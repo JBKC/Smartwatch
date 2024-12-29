@@ -91,6 +91,7 @@ def window_data(window_dict):
     return window_dict
 
 
+
 def save_ppg_dalia(dir, conn, cur):
     '''
     ## TRAINING DATASET 1 - PPG-Dalia
@@ -179,12 +180,15 @@ def save_wrist_ppg(dir, conn, cur):
         record = wfdb.rdrecord(f'{dir}/wrist+ppg/{s}')
         print(f'extracting: {dataset}, {s}')
 
-        # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer
+        # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer, 12 = labels
         ecg = record.adc()[:,0]
         ppg = record.adc()[:, 1]
         x = record.adc()[:, 5]
         y = record.adc()[:, 6]
         z = record.adc()[:, 7]
+        labels = record.adc()[:,12]
+        print(len(labels))
+
 
         # print(ecg.shape)
         # print(ppg.shape)
@@ -193,7 +197,7 @@ def save_wrist_ppg(dir, conn, cur):
         # print(z.shape)
 
         # generate HR labels using peak detection on ECG signal
-        peak_detection_qrs.main(ecg,fs=256)
+        # peak_detection_qrs.main(ecg,fs=256)
 
         # plt.plot(ecg)
         # plt.show()

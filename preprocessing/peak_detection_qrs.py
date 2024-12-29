@@ -1,6 +1,6 @@
 '''
 Finds QRS peaks in ECG signals finder using Pan-Tompkins algorithm
-Used to create labels for smartwatch HR estimation
+Outputs labels for smartwatch HR estimation for when no ground truth is provided
 Called from gather_raw_data.py
 '''
 
@@ -332,7 +332,7 @@ class Heart_Rate():
         '''
 
         # if (self.m_win[peak_val] >= self.Threshold_I1):
-        #     # JB EDIT - if a mwin peak is above 10x the average, don't count in the threshold update
+        #     # optional JB edit - if a mwin peak is above 10x the average, don't count in the threshold update
         #     # it's counting the T-Waves as well, that's why... fidx a way to move T-Wave up
         #     if (self.m_win[peak_val] >= 10 * np.mean(self.m_win[:peak_val])):
         #         pass
@@ -442,14 +442,14 @@ class Heart_Rate():
                 x_coord = np.asarray(self.b_pass == max_val).nonzero()
                 self.probable_peaks.append(x_coord[0][0])
 
-            # update rolling RR interval acceptability limits
-            if (idx < len(self.probable_peaks) and idx != 0):
-                self.adjust_rr_interval(idx)
+            # # update rolling RR interval acceptability limits
+            # if (idx < len(self.probable_peaks) and idx != 0):
+            #     self.adjust_rr_interval(idx)
 
-                # Adjust y-axis thresholds
-                if (self.RR_Average1 < self.RR_Low_Limit or self.RR_Average1 > self.RR_Missed_Limit):
-                    self.Threshold_I1 /= 2
-                    self.Threshold_F1 /= 2
+            # Adjust y-axis thresholds
+            if (self.RR_Average1 < self.RR_Low_Limit or self.RR_Average1 > self.RR_Missed_Limit):
+                self.Threshold_I1 /= 2
+                self.Threshold_F1 /= 2
 
                 # Searchback to make sure we haven't missed a peak
                 RRn = self.RR1[-1]          # set RRn to most recent RR interval
@@ -468,40 +468,56 @@ class Heart_Rate():
         # Searchback in ECG signal
         self.ecg_searchback()
 
-        # Custom formula that removes extremely low spurious RR intervals
+        # Custom JB formula that removes extremely low spurious RR intervals
         self.final_check()
 
         return np.array(self.result).astype(int), self.r_locs, np.array(self.probable_peaks).astype(int)
 
 
-
-def plot_peaks(signal, result, r_locs, probable):
-
-    plt.plot(signal, color='blue')
-    plt.scatter(result, signal[result], color='red', s=50, marker='*')
-    # for i, (xi, yi) in enumerate(zip(result, signal[result])):
-    #     plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
-
-    plt.show()
-
 def main(ecg,fs):
+
+    def plot_peaks(signal, result, r_locs, probable):
+        plt.plot(signal, color='blue')
+        plt.scatter(result, signal[result], color='red', s=50, marker='*')
+        # for i, (xi, yi) in enumerate(zip(result, signal[result])):
+        #     plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
+
+        plt.show()
+
+    def create_labels(signal, peaks, window_size, step_size):
+        labels = []
+
+        for i in range(0, len(signal) - window_size + 1, step_size):
+            window_r_peaks = [peak for peak in peaks if i <= peak < i + window_size]
+
+            if len(window_r_peaks) >= 2:
+                window_bpm = (60 * fs) / np.average(np.diff(window_r_peaks))
+                labels.append(window_bpm)
+
+        return labels
+
 
     print(ecg.shape)
 
     # produce mwin signal
     mwin = Pan_Tompkins_QRS(fs=fs).solve(ecg)
-    # plt.plot(mwin)
-    # plt.show()
-
     # find locations of peaks
-    result, r_locs, probable = Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
+    result, r_locs, probable = Heart_Rate(signal=ecg, fs=fs).find_r_peaks()
 
     print(result.shape)
     print(r_locs.shape)
     print(probable.shape)
 
-    # plot results
-    # plot_peaks(ecg, result, r_locs, probable)
+    # create HR labels by windowing ECG
+    window_size = 8*fs
+    step_size = 2*fs
+    labels = create_labels(ecg, result, window_size, step_size)
+
+    # plot peaks
+    plot_peaks(ecg, result, r_locs, probable)
+    # plot heartrate
+    plt.plot(labels)
+    plt.show()
 
 
 if __name__ == '__main__':
