@@ -59,7 +59,8 @@ def window_data(window_dict):
     n_windows = int(len(window_dict['label']))
 
     for k, f in fs.items():
-        # can alternatively use skimage.util.shape.view_as_windows method
+        if k not in window_dict:
+            continue
 
         window = 8*f                        # size of window
         step = 2*f                          # size of step
@@ -115,10 +116,10 @@ def save_ppg_dalia(dir, conn, cur):
             activity = data['activity']
             label = data['label']  # ground truth EEG
 
-            print(ppg.shape)                            # (n_samples, 1)
-            print(acc.shape)                            # (n_samples, 3)
-            print(activity.shape)                       # (n_samples, 1)
-            print(label.shape)                          # (n_samples,)
+            # print(ppg.shape)                            # (n_samples, 1)
+            # print(acc.shape)                            # (n_samples, 3)
+            # print(activity.shape)                       # (n_samples, 1)
+            # print(label.shape)                          # (n_samples,)
 
             # alignment corrections & filter data for consistency
             ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
@@ -126,10 +127,10 @@ def save_ppg_dalia(dir, conn, cur):
             activity = activity[:-1].T
             label = label[:-1]
 
-            print(ppg.shape)                            # (1, n_samples)
-            print(acc.shape)                            # (3, n_samples)
-            print(activity.shape)                       # (1, n_samples)
-            print(label.shape)                          # (n_samples,)
+            # print(ppg.shape)                            # (1, n_samples)
+            # print(acc.shape)                            # (3, n_samples)
+            # print(activity.shape)                       # (1, n_samples)
+            # print(label.shape)                          # (n_samples,)
 
             # add to dictionary and window
             window_dict = {
@@ -140,10 +141,10 @@ def save_ppg_dalia(dir, conn, cur):
             }
             window_dict = window_data(window_dict)
 
-            print(window_dict['ppg'].shape)
-            print(window_dict['acc'].shape)
-            print(window_dict['activity'].shape)
-            print(window_dict['label'].shape)
+            print(window_dict['ppg'].shape)             # (n_samples, 256)
+            print(window_dict['acc'].shape)             # (n_samples, 3, 256)
+            print(window_dict['activity'].shape)        # (n_samples,)
+            print(window_dict['label'].shape)           # (n_samples,)
 
             rows = [
                 (
@@ -190,20 +191,16 @@ def save_wrist_ppg(dir, conn, cur):
         ppg = np.expand_dims(record.adc()[:, 1][::8], axis=-1)
         acc = np.stack((record.adc()[:, 5][::8], record.adc()[:, 6][::8], record.adc()[:, 7][::8]), axis=-1)
 
-        print(ppg.shape)  # (n_samples, 1)
-        print(acc.shape)  # (n_samples, 3)
-
-        plt.plot(ppg[:,0])
+        # print(ppg.shape)  # (n_samples, 1)
+        # print(acc.shape)  # (n_samples, 3)
 
         ppg = butter_filter(signal=ppg.T, btype='bandpass', lowcut=0.5, highcut=15)
         acc = butter_filter(signal=acc.T, btype='lowpass', highcut=15)
 
-        plt.plot(ppg[0,:])
-        plt.show()
+        # print(ppg.shape)  # (1, n_samples)
+        # print(acc.shape)  # (3, n_samples)
 
-        print(ppg.shape)  # (1, n_samples)
-        print(acc.shape)  # (3, n_samples)
-
+        # generate labels using peak detection algorithm on ECG
         label = peak_detection_qrs.main(ecg=ecg,fs=256)
 
         # add to dictionary and window
@@ -214,9 +211,9 @@ def save_wrist_ppg(dir, conn, cur):
         }
         window_dict = window_data(window_dict)
 
-        print(window_dict['ppg'].shape)
-        print(window_dict['acc'].shape)
-        print(window_dict['label'].shape)
+        print(window_dict['ppg'].shape)  # (n_samples, 256)
+        print(window_dict['acc'].shape)  # (n_samples, 3, 256)
+        print(window_dict['label'].shape)  # (n_samples,)
 
         # print(ecg.shape)
         # print(ppg.shape)

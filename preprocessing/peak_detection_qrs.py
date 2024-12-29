@@ -497,8 +497,6 @@ def main(ecg,fs):
         return labels
 
 
-    print(ecg.shape)
-
     # produce mwin signal
     mwin = Pan_Tompkins_QRS(fs=fs).solve(ecg)
     # find locations of peaks
@@ -509,13 +507,12 @@ def main(ecg,fs):
     step_size = 2*fs
     labels = create_labels(ecg, result, window_size, step_size)
 
-    # plot peaks
-    plot_peaks(ecg, result, r_locs, probable)
-    # plot heartrate
+    # plot peaks & heartrate
+    # plot_peaks(ecg, result, r_locs, probable)
     # plt.plot(labels)
     # plt.show()
 
-    return labels
+    return np.array(labels)
 
 
 if __name__ == '__main__':
