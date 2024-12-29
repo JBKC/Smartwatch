@@ -251,9 +251,9 @@ class Heart_Rate():
 
         # Reset limits based on average
         if (len(self.RR2) > 7 or idx < 8):
-            self.RR_Low_Limit = 0.8 * RR_Average2
-            self.RR_High_Limit = 1.25 * RR_Average2
-            self.RR_Missed_Limit = 1.8 * RR_Average2
+            self.RR_Low_Limit = 0.92 * RR_Average2
+            self.RR_High_Limit = 1.16 * RR_Average2
+            self.RR_Missed_Limit = 1.66 * RR_Average2
 
     def searchback(self, peak_val, RRn, sb_win):
         '''
@@ -309,7 +309,7 @@ class Heart_Rate():
                         self.Threshold_F2 = 0.5 * self.Threshold_F1
 
                         # Append the location of probable missed peak
-                        self.probable_peaks.append(r_max)
+                        self.r_locs.append(r_max)
 
     def find_t_wave(self, peak_val, RRn, idx, prev_idx):
         '''
@@ -323,7 +323,7 @@ class Heart_Rate():
         if (self.m_win[peak_val] >= self.Threshold_I1):
 
             # set reasonable interval range for T-waves
-            if (idx > 0 and 0.10 < RRn < 0.30):
+            if (idx > 0 and 0.20 < RRn < 0.36):
                 # Find the slope of current and last waveform detected
                 curr_slope = max(np.diff(self.m_win[peak_val - round(self.win_150ms / 2): peak_val + 1]))
                 last_slope = max(
@@ -498,81 +498,17 @@ class Heart_Rate():
         # Custom formula that removes stupid-low RR-intervals
         # self.final_check()
 
-        return self.result, self.probable_peaks, self.r_locs
+        return np.array(self.result).astype(int), self.r_locs, np.array(self.probable_peaks).astype(int)
 
 
-######## PRESENTING DATA ########################################################################
 
-def plot_data():
-    # Convert ecg signal to numpy array
+def plot_peaks(signal, result, r_locs, probable):
 
-    if isinstance(ecg, np.ndarray):
-        signal = ecg
-    else:
-        signal = ecg.to_numpy()
+    # plt.plot(signal, color='blue')
+    # plt.scatter(result, signal[result], color='red', s=50, marker='*')
+    # # for i, (xi, yi) in enumerate(zip(result, signal[result])):
+    # #     plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
 
-    # Find the R peak locations
-    hr = heart_rate(signal, fs)
-    result, probable_peaks, r_locs = hr.find_r_peaks()
-    result = np.array(result)
-    probable_peaks = np.array(probable_peaks)
-
-    # Clip the x locations less than 0 (Learning Phase)
-    result = result[result > 0]
-
-    # Calculate the overall heart rate
-    heartRate = (60 * fs) / np.average(np.diff(result[1:]))
-    print("Heart Rate", heartRate, "BPM")
-
-    ### set up the sliding 8 second window for model prep
-    window_size = 8 * fs  # 8-second window size
-    step_size = 2 * fs  # 2-second step size
-    heart_rates = []
-    rmssd_values = []
-    rr_intervals_matrix = []
-
-    for i in range(0, len(signal) - window_size + 1, step_size):
-        window_r_peaks = [peak for peak in result if i <= peak < i + window_size]
-        # ^ 'list comprehension' - remember this format
-
-        if len(window_r_peaks) >= 2:
-            window_bpm = (60 * fs) / np.average(np.diff(window_r_peaks))
-            heart_rates.append(window_bpm)
-
-            rr_intervals = np.diff(window_r_peaks)  # convert to ms
-            rr_intervals = rr_intervals * 1000 / fs
-            rr_intervals_matrix.append(rr_intervals)
-
-            rmssd = np.sqrt(np.mean(np.diff(rr_intervals) ** 2))
-            rmssd_values.append(rmssd)
-
-    # SAVE HEARTRATES TO EXTERNAL FILE
-    # with open(session + '_heart_rate_wesad.pkl', 'wb') as file:
-    #     pickle.dump(heart_rates, file)
-
-
-    '''
-    output_csv_file = 'OUTPUT.csv'
-    try:
-        with open(output_csv_file, 'w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerows(rr_intervals_matrix)
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    '''
-
-    rr_intervals = np.diff(result)
-    # plt.plot(rmssd_values)
-    # plt.plot(rmssd_values)
-    plt.plot(heart_rates, color='black')
-    plt.show()
-
-    plt.plot(signal, color='blue')
-    plt.scatter(result, signal[result], color='red', s=50, marker='*')
-    for i, (xi, yi) in enumerate(zip(result, signal[result])):
-        plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
-
-    ## Check each stage (signal, bpass, der, sqr, mwin)
     # plt.plot(bpass, color = 'red')
     # plt.plot(der / 100, color = 'black')
     # plt.plot(sqr / 10000000, color = 'black')
@@ -581,6 +517,7 @@ def plot_data():
     #     plt.axvline(x=peak, color='r', linestyle='--')
 
     plt.show()
+
 
 def main(ecg,fs):
 
@@ -592,10 +529,13 @@ def main(ecg,fs):
     # plt.show()
 
     # find locations of peaks
-    Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
+    result, r_locs, probable = Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
 
-    # plot
-    
+    # plot results
+    print(result.shape)
+    print(r_locs.shape)
+    print(probable.shape)
+    plot_peaks(ecg, result, r_locs, probable)
 
 
 if __name__ == '__main__':
