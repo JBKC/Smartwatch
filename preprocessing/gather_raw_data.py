@@ -1,5 +1,5 @@
 '''
-Extract raw data and upload to PostgreSQL database
+Extract raw data, perform intial pre-processing, slice into windows, and upload to PostgreSQL database
 '''
 
 import pickle
@@ -7,11 +7,93 @@ import numpy as np
 import pandas as pd
 import os
 import psycopg2
+from scipy.signal import butter, filtfilt
+
+
+def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
+    """
+    Applies Butterworth filter
+    :param signal: input signal of shape (n_channels, n_samples)
+    :return smoothed: smoothed signal of shape (n_channels, n_samples)
+    """
+
+    nyquist = 0.5 * fs
+
+    if btype == 'bandpass':
+        low = lowcut / nyquist
+        high = highcut / nyquist
+        b, a = butter(order, [low, high], btype=btype)
+    elif btype == 'lowpass':
+        high = highcut / nyquist
+        b, a = butter(order, high, btype=btype)
+    elif btype == 'highpass':
+        low = lowcut / nyquist
+        b, a = butter(order, low, btype=btype)
+
+    # apply filter using filtfilt (zero-phase filtering)
+    filtered = np.array([filtfilt(b, a, channel) for channel in signal])
+
+    return filtered
+
+
+def window_data(window_dict):
+    '''
+    Segment data into windows of 8 seconds with 2 second overlap. Only used when saving down raw data for first time
+    :param window_dict: dictionary with all signals in arrays for given session
+    :return: dictionary of windowed signals containing X and Y data
+        ppg.shape = (n_windows, 1, 256)
+        acc.shape = (n_windows, 3, 256)
+        labels.shape = (n_windows,)
+        activity.shape = (n_windows,)
+    '''
+
+    # sampling rates
+    fs = {
+        'ppg': 32,                  # fs_ppg = 64 in paper but downsampled to match accelerometer
+        'acc': 32,
+        'activity': 4
+    }
+
+    n_windows = int(len(window_dict['label']))
+
+    for k, f in fs.items():
+        # can alternatively use skimage.util.shape.view_as_windows method
+
+        window = 8*f                        # size of window
+        step = 2*f                          # size of step
+        data = window_dict[k]
+
+        if k == 'ppg':
+            # (1, n_samples) -> (n_windows, 1, 256)
+            window_dict[k] = np.zeros((n_windows, 1, window))
+            for i in range(n_windows):
+                start = i * step
+                end = start + window
+                window_dict[k][i, :, :] = data[:, start:end]
+
+        if k == 'acc':
+            window_dict[k] = np.zeros((n_windows, 3, window))
+            for i in range(n_windows):
+                start = i * step
+                end = start + window
+                window_dict[k][i, :, :] = data[:, start:end]
+
+        if k == 'activity':
+            window_dict[k] = np.zeros((n_windows,))
+            for i in range(n_windows):
+                start = i * step
+                end = start + window
+                window_dict[k][i] = data[0, start:end][0]             # take first value as value of whole window
+
+    return window_dict
+
 
 def save_ppg_dalia(dir, cur):
     '''
     ## TRAINING DATASET 1 - PPG-Dalia
     '''
+
+    dataset = 'ppg_dalia'
 
     # iterate through sessions
     for s in os.listdir(f'{dir}/ppg+dalia'):
@@ -24,34 +106,60 @@ def save_ppg_dalia(dir, cur):
             data = pickle.load(file, encoding='latin1')
 
             # get raw data from pkl file
-            ppg = np.squeeze(data['signal']['wrist']['BVP'][::2])  # downsample PPG to match fs_acc
+            ppg = data['signal']['wrist']['BVP'][::2]  # downsample PPG to match fs_acc
             acc = data['signal']['wrist']['ACC']
-            activity = np.squeeze(data['activity'])
-            label = np.squeeze(data['label'])  # ground truth EEG
+            activity = data['activity']
+            label = data['label']  # ground truth EEG
 
-            print(ppg.shape)
-            print(acc.shape)
-            print(activity.shape)
-            print(label.shape)
+            # alignment corrections & filter accelerometer data
+            ppg = ppg[38:].T
+            acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=10)
+            activity = activity[:-1].T
+            label = label[:-1]
 
+            # print(ppg.shape)
+            # print(acc.shape)
+            # print(activity.shape)
+            # print(label.shape)
 
-            # alignment corrections
-            data_dict[s]['ppg'] = data_dict[s]['ppg'][38:, :].T  # (1, n_samples)
-            data_dict[s]['acc'] = data_dict[s]['acc'][:-38, :].T  # (3, n_samples)
-            data_dict[s]['label'] = data_dict[s]['label'][:-1]  # (n_windows,)
-            data_dict[s]['activity'] = data_dict[s]['activity'][:-1, :].T  # (1, n_samples)
+            # add to dictionary and window
+            window_dict = {
+                'ppg': ppg,
+                'acc': acc,
+                'activity': activity,
+                'label': label
+            }
+            window_dict = window_data(window_dict)
 
-            print(data_dict[s]['ppg'].shape)
-            print(data_dict[s]['activity'])
+            print(window_dict['ppg'].shape)
+            print(window_dict['acc'].shape)
+            print(window_dict['activity'].shape)
+            print(window_dict['label'].shape)
+
+            rows = [
+                (
+                    dataset,  # Dataset name
+                    s,  # Session identifier
+                    ppg[i],  # PPG value
+                    acc[i],  # Accelerometer data as an array
+                    activity[i],  # Activity label
+                    label[i]  # Classification label
+                )
+                for i in range(len(label))
+            ]
+
+            print(rows)
 
             # Insert into the SQL database
             cur.execute("""
-                INSERT INTO raw_ppg_dalia (session_name, ppg, acc_x, acc_y, acc_z, label, activity)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (s, ppg, acc_x, acc_y, acc_z, label, activity))
+                INSERT INTO sensor_data (dataset, session_number, ppg, acc)
+                VALUES (%s, %s, %s, %s)
+            """, (dataset, s, ppg, acc))
 
             conn.commit()
             print(f'Inserted session: {s}')
+
+
 
 
 
