@@ -8,6 +8,7 @@ import pandas as pd
 import os
 import psycopg2
 from scipy.signal import butter, filtfilt
+import wfdb
 import matplotlib.pyplot as plt
 
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
@@ -166,38 +167,46 @@ def save_wrist_ppg(dir, conn, cur):
 
     dataset = 'wrist_ppg'
 
-    # iterate through sessions
-    for s in os.listdir(f'{dir}/ppg+dalia'):
-        if s == '.DS_Store':  # Skip .DS_Store
-            continue
-        with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting {s}')
+    # iterate through session files
+    sessions = [f for f in os.listdir(f'{dir}/wrist+ppg') if f.endswith('.hea')]
 
-            data = pickle.load(file, encoding='latin1')
+    for s in sessions:
+        # remove extension
+        s, _ = os.path.splitext(s)
 
-    # from .hea file: 0 = ecg, 1 = ppg, 2-4 = gyro, 5-7 = 2g accelerometer, 8-10 = 16g accelerometer
-    df = pd.DataFrame({
-        'ppg': record.adc()[:, 0],
-        'x': record.adc()[:, 5],
-        'y': record.adc()[:, 6],
-        'z': record.adc()[:, 7]
-    })
-    ppg_data = df['ppg']
-    x_data = df['x']
-    y_data = df['y']
-    z_data = df['z']
+        record = wfdb.rdrecord(f'{dir}/wrist+ppg/{s}')
+        print(f'extracting: {dataset}, {s}')
 
-    with open('/Users/jamborghini/Documents/PYTHON/Fatigue Model/' + session_name +'_heart_rate_wrist_ppg.pkl', 'rb') as file:
-        ecg_ground_truth = pickle.load(file, encoding='latin1')
+        # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer
+        ecg = record.adc()[:,0]
+        ppg = record.adc()[:, 1]
+        x = record.adc()[:, 5]
+        y = record.adc()[:, 6]
+        z = record.adc()[:, 7]
 
-    fs_ppg = 256  # from the paper
-    fs_acc = 256
-    num_ppg = len(ppg_data)
-    num_acc = len(x_data)
-    time_analyse_seconds = len(ppg_data) / fs_ppg  # this is the total time in seconds
+        print(ecg.shape)
+        print(ppg.shape)
+        print(x.shape)
+        print(y.shape)
+        print(z.shape)
 
-    return ppg_data, x_data, y_data, z_data, ecg_ground_truth, fs_ppg, fs_acc, num_ppg, num_acc
+        plt.plot(ecg)
+        plt.show()
+        plt.plot(ppg)
+        plt.show()
+
+
+
+    # with open('/Users/jamborghini/Documents/PYTHON/Fatigue Model/' + session_name +'_heart_rate_wrist_ppg.pkl', 'rb') as file:
+    #     ecg_ground_truth = pickle.load(file, encoding='latin1')
+    #
+    # fs_ppg = 256  # from the paper
+    # fs_acc = 256
+    # num_ppg = len(ppg_data)
+    # num_acc = len(x_data)
+    # time_analyse_seconds = len(ppg_data) / fs_ppg  # this is the total time in seconds
+
 
 ## TRAINING DATASET 3 - preprocessing WESAD
 def preprocess_data_wesad(session_name):
@@ -243,8 +252,8 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = root_dir+'/raw_data'
 
-    save_ppg_dalia(data_dir, conn, cur)
-    # save_wrist_ppg(data_dir, conn, cur)
+    # save_ppg_dalia(data_dir, conn, cur)
+    save_wrist_ppg(data_dir, conn, cur)
 
 
 if __name__ == '__main__':
