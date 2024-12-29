@@ -49,7 +49,6 @@ def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
 
     return filtered
 
-
 def window_data(window_dict):
     '''
     Segment data into windows of 8 seconds with 2 second overlap. Only used when saving down raw data for first time
@@ -61,14 +60,23 @@ def window_data(window_dict):
         activity.shape = (n_windows,)
     '''
 
-    # sampling rates
+    # sampling rates (PPG dalia reference)
     fs = {
-        'ppg': 32,                  # fs_ppg = 64 in paper but downsampled to match accelerometer
+        'ppg': 32,
         'acc': 32,
         'activity': 4
     }
 
-    n_windows = int(len(window_dict['label']))
+    # align n_windows
+    window_size = 8*32
+    step_size = 2*32
+    data_size = window_dict['ppg'].shape[1]
+    n_windows = (data_size - window_size) // step_size + 1
+    n_windows = min(len(window_dict['label']), n_windows)
+
+    # Truncate label array to match n_windows
+    if 'label' in window_dict:
+        window_dict['label'] = window_dict['label'][:n_windows]
 
     for k, f in fs.items():
         if k not in window_dict:
@@ -101,7 +109,7 @@ def window_data(window_dict):
                 end = start + window
                 window_dict[k][i] = data[0, start:end][0]             # take first value as value of whole window
 
-    return window_dict
+    return window_dict, n_windows
 
 def save_ppg_dalia(dir, conn, cur):
     '''
@@ -137,6 +145,11 @@ def save_ppg_dalia(dir, conn, cur):
             activity = activity[:-1].T
             label = label[:-1]
 
+            plt.plot(ppg[0, :])
+            plt.show()
+            plt.plot(acc[0, :])
+            plt.show()
+
             # print(ppg.shape)                            # (1, n_samples)
             # print(acc.shape)                            # (3, n_samples)
             # print(activity.shape)                       # (1, n_samples)
@@ -149,7 +162,7 @@ def save_ppg_dalia(dir, conn, cur):
                 'activity': activity,
                 'label': label
             }
-            window_dict = window_data(window_dict)
+            window_dict, n_windows = window_data(window_dict)
 
             print(window_dict['ppg'].shape)             # (n_samples, 256)
             print(window_dict['acc'].shape)             # (n_samples, 3, 256)
@@ -166,7 +179,7 @@ def save_ppg_dalia(dir, conn, cur):
                     int(window_dict['activity'][i]),
                     window_dict['label'][i]
                 )
-                for i in range(len(label))
+                for i in range(n_windows)
             ]
 
             cur.executemany("""
@@ -177,7 +190,9 @@ def save_ppg_dalia(dir, conn, cur):
             conn.commit()
             print(f'saved: {dataset}, {s}')
 
-            return
+    print(f'extraction completed: {dataset},')
+
+    return
 
 
 def save_wrist_ppg(dir, conn, cur):
@@ -209,8 +224,11 @@ def save_wrist_ppg(dir, conn, cur):
         ppg = butter_filter(signal=ppg.T, btype='bandpass', lowcut=0.5, highcut=15)
         acc = butter_filter(signal=acc.T, btype='lowpass', highcut=15)
 
-        plt.plot(acc[1, :])
+        plt.plot(ppg[0, :])
         plt.show()
+        plt.plot(acc[0, :])
+        plt.show()
+
 
         print(ppg.shape)  # (1, n_samples)
         print(acc.shape)  # (3, n_samples)
@@ -224,7 +242,7 @@ def save_wrist_ppg(dir, conn, cur):
             'acc': acc,
             'label': label
         }
-        window_dict = window_data(window_dict)
+        window_dict, n_windows = window_data(window_dict)
 
         print(window_dict['ppg'].shape)  # (n_samples, 256)
         print(window_dict['acc'].shape)  # (n_samples, 3, 256)
@@ -250,7 +268,7 @@ def save_wrist_ppg(dir, conn, cur):
                 int(activity),
                 window_dict['label'][i]
             )
-            for i in range(len(label))
+            for i in range(n_windows)
         ]
 
         cur.executemany("""
@@ -261,7 +279,9 @@ def save_wrist_ppg(dir, conn, cur):
         conn.commit()
         print(f'saved: {dataset}, {s}')
 
-        return
+    print(f'extraction completed: {dataset},')
+
+    return
 
 
 def save_wesad(dir, conn, cur):
@@ -289,15 +309,20 @@ def save_wesad(dir, conn, cur):
             ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
             acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
 
+            plt.plot(ppg[0, :])
+            plt.show()
+            plt.plot(acc[0, :])
+            plt.show()
+
             # plt.plot(acc[1, :])
             # plt.show()
 
             # generate labels using peak detection algorithm on ECG
             label = peak_detection_qrs.main(ecg=ecg,fs=100)
 
-            print(ppg.shape)                            # (1, n_samples)
-            print(acc.shape)                            # (3, n_samples)
-            print(label.shape)                          # (n_samples,)
+            # print(ppg.shape)                            # (1, n_samples)
+            # print(acc.shape)                            # (3, n_samples)
+            # print(label.shape)                          # (n_samples,)
 
             # add to dictionary and window
             window_dict = {
@@ -305,34 +330,36 @@ def save_wesad(dir, conn, cur):
                 'acc': acc,
                 'label': label
             }
-            window_dict = window_data(window_dict)
+            window_dict, n_windows = window_data(window_dict)
 
             print(window_dict['ppg'].shape)  # (n_samples, 256)
             print(window_dict['acc'].shape)  # (n_samples, 3, 256)
             print(window_dict['label'].shape)  # (n_samples,)
 
-            # # Insert into the SQL database
-            # rows = [
-            #     (
-            #         dataset,
-            #         s,
-            #         window_dict['ppg'][i, :].tolist(),
-            #         window_dict['acc'][i, :, :].tolist(),
-            #         int(7),                             # set activity to working at desk
-            #         window_dict['label'][i]
-            #     )
-            #     for i in range(len(label))
-            # ]
-            #
-            # cur.executemany("""
-            #     INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
-            #     VALUES (%s, %s, %s, %s, %s, %s)
-            # """, rows)
-            #
-            # conn.commit()
-            # print(f'saved: {dataset}, {s}')
+            # Insert into the SQL database
+            rows = [
+                (
+                    dataset,
+                    s,
+                    window_dict['ppg'][i, :].tolist(),
+                    window_dict['acc'][i, :, :].tolist(),
+                    int(7),                             # set activity to working at desk
+                    window_dict['label'][i]
+                )
+                for i in range(n_windows)
+            ]
 
-            return
+            cur.executemany("""
+                INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, rows)
+
+            conn.commit()
+            print(f'saved: {dataset}, {s}')
+
+    print(f'extraction completed: {dataset},')
+
+    return
 
 
 def main():
