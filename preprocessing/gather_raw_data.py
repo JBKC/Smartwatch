@@ -1,5 +1,5 @@
 '''
-Extract raw data, perform intial pre-processing, slice into windows, and upload to PostgreSQL database
+Training Step 1: Extract raw data, perform intial pre-processing, slice into windows, and upload to PostgreSQL database
 '''
 
 import pickle
@@ -8,7 +8,7 @@ import pandas as pd
 import os
 import psycopg2
 from scipy.signal import butter, filtfilt
-
+import matplotlib.pyplot as plt
 
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
     """
@@ -102,7 +102,7 @@ def save_ppg_dalia(dir, conn, cur):
             continue
         with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting {s}')
+            print(f'extracting: {dataset}, {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -112,9 +112,9 @@ def save_ppg_dalia(dir, conn, cur):
             activity = data['activity']
             label = data['label']  # ground truth EEG
 
-            # alignment corrections & filter accelerometer data
-            ppg = ppg[38:].T
-            acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=10)
+            # alignment corrections & filter data for consistency
+            ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
+            acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
             activity = activity[:-1].T
             label = label[:-1]
 
@@ -156,17 +156,25 @@ def save_ppg_dalia(dir, conn, cur):
             """, rows)
 
             conn.commit()
-            print(f'inserted {s}')
+            print(f'saved: {dataset}, {s}')
 
 
+def save_wrist_ppg(dir, conn, cur):
+    '''
+    ## TRAINING DATASET 2 - Wrist PPG
+    '''
 
+    dataset = 'wrist_ppg'
 
+    # iterate through sessions
+    for s in os.listdir(f'{dir}/ppg+dalia'):
+        if s == '.DS_Store':  # Skip .DS_Store
+            continue
+        with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-## TRAINING DATASET 2 - preprocessing Wrist PPG
-def preprocess_data_wrist_ppg(session_name):
-    file_path = '/Users/jamborghini/Documents/PYTHON/TESTING DATA - Wrist PPG Dataset/'
-    file_name = file_path + session_name
-    record = wfdb.rdrecord(file_name)
+            print(f'extracting {s}')
+
+            data = pickle.load(file, encoding='latin1')
 
     # from .hea file: 0 = ecg, 1 = ppg, 2-4 = gyro, 5-7 = 2g accelerometer, 8-10 = 16g accelerometer
     df = pd.DataFrame({
@@ -236,6 +244,7 @@ def main():
     data_dir = root_dir+'/raw_data'
 
     save_ppg_dalia(data_dir, conn, cur)
+    # save_wrist_ppg(data_dir, conn, cur)
 
 
 if __name__ == '__main__':
