@@ -24,6 +24,21 @@ activity_mapping = {
     8: "running"
 }
 
+def z_normalise(X):
+    '''
+    Z-normalises data for all windows, across each channel, using vectorisation
+    :param X: of shape (n_windows, n_channels, 256)
+    '''
+
+    # calculate mean and stdev for each channel in each window - creates shape (n_windows, 4, 1)
+    ms = X.mean(axis=2, keepdims=True)
+    stds = X.std(axis=2, keepdims=True)
+
+    # Z-normalisation
+    X_norm = (X - ms) / np.where(stds != 0, stds, 1)
+
+    return X_norm, ms.squeeze(axis=2), stds.squeeze(axis=2)
+
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
     """
     Applies Butterworth filter
@@ -145,10 +160,10 @@ def save_ppg_dalia(dir, conn, cur):
             activity = activity[:-1].T
             label = label[:-1]
 
-            plt.plot(ppg[0, :])
-            plt.show()
-            plt.plot(acc[0, :])
-            plt.show()
+            # plt.plot(ppg[0, :])
+            # plt.show()
+            # plt.plot(acc[0, :])
+            # plt.show()
 
             # print(ppg.shape)                            # (1, n_samples)
             # print(acc.shape)                            # (3, n_samples)
@@ -224,10 +239,10 @@ def save_wrist_ppg(dir, conn, cur):
         ppg = butter_filter(signal=ppg.T, btype='bandpass', lowcut=0.5, highcut=15)
         acc = butter_filter(signal=acc.T, btype='lowpass', highcut=15)
 
-        plt.plot(ppg[0, :])
-        plt.show()
-        plt.plot(acc[0, :])
-        plt.show()
+        # plt.plot(ppg[0, :])
+        # plt.show()
+        # plt.plot(acc[0, :])
+        # plt.show()
 
 
         print(ppg.shape)  # (1, n_samples)
@@ -309,12 +324,9 @@ def save_wesad(dir, conn, cur):
             ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
             acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
 
-            plt.plot(ppg[0, :])
-            plt.show()
-            plt.plot(acc[0, :])
-            plt.show()
-
-            # plt.plot(acc[1, :])
+            # plt.plot(ppg[0, :])
+            # plt.show()
+            # plt.plot(acc[0, :])
             # plt.show()
 
             # generate labels using peak detection algorithm on ECG
@@ -378,8 +390,9 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = root_dir+'/raw_data'
 
-    # save_ppg_dalia(data_dir, conn, cur)
-    # save_wrist_ppg(data_dir, conn, cur)
+    ###
+    save_ppg_dalia(data_dir, conn, cur)
+    save_wrist_ppg(data_dir, conn, cur)
     save_wesad(data_dir, conn, cur)
 
 
