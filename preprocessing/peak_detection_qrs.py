@@ -173,18 +173,28 @@ class Heart_Rate():
 
     def __init__(self, signal, fs):
         '''
-        Initialize Variables
         :param signal: input signal
-        :param fs: sample frequency of input signal
+        :param fs: sampling frequency of input signal
         '''
 
-        # Initialize variables
-        self.RR1, self.RR2, self.probable_peaks, self.r_locs, self.peaks, self.result = ([] for i in range(6))
+        # RR1 = list of last 8 RR intervals
+        # RR2 = list of last 8 RR intervals within an acceptable range
+        # peaks = list of all local maxima
+        # probable_peaks = list of peaks found from local maxima regions on bandpass filtered signal
+        # r_locs =
+        self.RR1, self.RR2, self.peaks, self.probable_peaks, self.r_locs, self.result = ([] for _ in range(6))
+
+        # SPKI = running estimate of R peak == highest peak that falls within RR window
+        # NPKI = running estimate of noise peak == highest peak that falls within lower threshold
+        # Threshold_I1 = first threshold applied to mwin signal
+        # Threshold_I2 = second threshold applied to mwin signal
+        # SPKF =
+        # NPKF =
+        # Threshold_F1 = first threshold applied to bandpass signal
+        # Threshold_F2 = second threshold applied to bandpass signal
         self.SPKI, self.NPKI, self.Threshold_I1, self.Threshold_I2, self.SPKF, self.NPKF, self.Threshold_F1, self.Threshold_F2 = (
-        0 for i in range(8))
-        # SPKI = running estimate of signal (R) peak. It's the HIGHEST PEAK that falls within an RR window
-        # NPKI = running estimate of noise peak. It's the highest peak that falls BELOW the lower threshold (distinguishing it from an R peak)
-        # I1, I2 thresholds used on moving average resultant signal; F1, F2 used on the bandpassed ecg signal. Done on both signals for increased accuracy.
+        0 for _ in range(8))
+        
         self.T_wave = False
         self.m_win = mwin
         self.b_pass = bpass
@@ -216,47 +226,45 @@ class Heart_Rate():
 
     def adjust_rr_interval(self, idx):
         '''
-        Adjust RR Interval and Limits
-        :param idx: current index in peaks array
+        Adjust acceptable localised HR (RR) interval range based on trailing average of intervals
+        :param idx: current index in probable_peaks array
         '''
 
-        # Finding the eight most recent RR intervals
+        # Get the 8 most recent RR intervals (RR1)
         self.RR1 = np.diff(self.peaks[max(0, idx - 8): idx + 1]) / self.fs
 
-        # Calculating RR Averages
+        # Calculate average interval
         self.RR_Average1 = np.mean(self.RR1)
         RR_Average2 = self.RR_Average1
 
-        # Finding the eight most recent RR intervals lying between RR Low Limit and RR High Limit
+        # Finding the 8 most recent RR intervals lying between RR Low Limit and RR High Limit
         if (idx >= 8):
             for i in range(0, 8):
+                # keep only those that lie in the range (RR2)
                 if (self.RR_Low_Limit < self.RR1[i] < self.RR_High_Limit):
                     self.RR2.append(self.RR1[i])
-
+                    # keep RR2 length dynamically set to 8
                     if (len(self.RR2) > 8):
                         self.RR2.remove(self.RR2[0])
                         RR_Average2 = np.mean(self.RR2)
 
-        # Adjusting the RR Low Limit and RR High Limit
+        # Reset limits based on average
         if (len(self.RR2) > 7 or idx < 8):
-            self.RR_Low_Limit = 0.92 * RR_Average2
-            self.RR_High_Limit = 1.16 * RR_Average2
-            self.RR_Missed_Limit = 1.66 * RR_Average2
+            self.RR_Low_Limit = 0.8 * RR_Average2
+            self.RR_High_Limit = 1.25 * RR_Average2
+            self.RR_Missed_Limit = 1.8 * RR_Average2
 
     def searchback(self, peak_val, RRn, sb_win):
-        # point here is to see if we missed a beat on a local scale
-
         '''
-        Searchback
+        Searchback to see if a local peak was missed
         :param peak_val: peak location in consideration
         :param RRn: the most recent RR interval
         :param sb_win: searchback window
         '''
 
-        # Round 1 - search in m_win
-        # Check if the most recent RR interval is greater than the RR Missed Limit (ie implying we missed an R peak)
+        # Check if the most recent RR interval is greater than the RR Missed Limit (implying a missed peak)
         if (RRn > self.RR_Missed_Limit):
-            # Initialize a window to searchback
+            # Create searchback window of size RRn
             win_rr = self.m_win[peak_val - sb_win + 1: peak_val + 1]
 
             # Find the x locations inside the window having y values greater than Threshold I1
@@ -473,26 +481,27 @@ class Heart_Rate():
             # for each local maximum, set up a search window - giving approximate peak regions
             peak_val = self.peaks[idx]
             win_300ms = np.arange(max(0, self.peaks[idx] - self.win_150ms), min(self.peaks[idx] + self.win_150ms, len(self.b_pass) - 1), 1)
-            max_val = max(self.b_pass[win_300ms], default=0)        # returns maximum value in the search window
+            max_val = max(self.b_pass[win_300ms], default=0)        # find maximum value in the search window
 
-            # use the approximate peak regions to find the peak locations in the bandpassed (original) signal
+            # use the approximate peak regions to find the peak locations in the original bandpassed signal
             if (max_val != 0):
                 x_coord = np.asarray(self.b_pass == max_val).nonzero()
                 self.probable_peaks.append(x_coord[0][0])
 
+            # update rolling RR interval acceptability limits
             if (idx < len(self.probable_peaks) and idx != 0):
-                # Adjust RR interval and limits
                 self.adjust_rr_interval(idx)
 
-            # Adjust RR interval thresholds in case of irregular beats
-            if (self.RR_Average1 < self.RR_Low_Limit or self.RR_Average1 > self.RR_Missed_Limit):
-                self.Threshold_I1 /= 2
-                self.Threshold_F1 /= 2
+                # Adjust y-axis thresholds
+                if (self.RR_Average1 < self.RR_Low_Limit or self.RR_Average1 > self.RR_Missed_Limit):
+                    self.Threshold_I1 /= 2
+                    self.Threshold_F1 /= 2
 
+                # set RRn to most recent RR interval
                 RRn = self.RR1[-1]
 
                 # Searchback to make sure we haven't missed a peak
-                self.searchback(peak_val, RRn, round(RRn * self.fs))
+                self.searchback(peak_val, RRn, sb_win=round(RRn * self.fs))
 
                 # Confirm the searchback isn't picking up T-waves instead of R peaks
                 self.find_t_wave(peak_val, RRn, idx, idx - 1)
