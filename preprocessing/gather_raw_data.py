@@ -186,14 +186,14 @@ def save_wrist_ppg(dir, conn, cur):
         y = record.adc()[:, 6]
         z = record.adc()[:, 7]
 
-        print(ecg.shape)
-        print(ppg.shape)
-        print(x.shape)
-        print(y.shape)
-        print(z.shape)
+        # print(ecg.shape)
+        # print(ppg.shape)
+        # print(x.shape)
+        # print(y.shape)
+        # print(z.shape)
 
         # generate HR labels using peak detection on ECG signal
-        peak_detection_qrs.main(ecg)
+        peak_detection_qrs.main(ecg,fs=256)
 
         # plt.plot(ecg)
         # plt.show()

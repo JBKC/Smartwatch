@@ -1,6 +1,7 @@
 '''
 Finds QRS peaks in ECG signals finder using Pan-Tompkins algorithm
 Used to create labels for smartwatch HR estimation
+Called from gather_raw_data.py
 '''
 
 import wfdb
@@ -14,23 +15,6 @@ import subprocess
 import wfdb
 import csv
 
-# ### input format 1 - Wrist PPG dataset
-#
-# file_path = '/Users/jamborghini/Documents/PYTHON/TESTING DATA - Wrist PPG Dataset/'
-# session = 's3_run'  # adjust this
-#
-# file_name = file_path + session
-# record = wfdb.rdrecord(file_name)
-# # from .hea file: 0 = ecg, 1 = ppg, 2-4 = gyro, 5-7 = 2g accelerometer, 8-10 = 16g accelerometer
-# # ecg = pd.DataFrame({'ecg': record.adc()[:, 0]}) - old method that doesnt work because it doesn't denote the ecg column properly
-# df = pd.DataFrame({'ecg': record.adc()[:, 0]})
-# ecg = df['ecg']
-# df = pd.DataFrame({'ppg': record.adc()[:, 1]})
-# ppg = df['ppg']
-# print(ecg)
-# print(len(ecg))
-# fs = 256  # from the paper
-# time = len(ecg) / fs  # this is the total time in seconds
 
 '''
 ### input format 2 - WESAD
@@ -60,56 +44,18 @@ time = len(ecg) / fs
 '''
 
 
-######## PART 1: PRE-PROCESSING ########################################################################
-
 class Pan_Tompkins_QRS():
-    # below is the P-T defined bandpassing. But doesn't work as well for ECG. bizarre...
     '''
-    def band_pass_filter(self, signal):
-        result = None
-
-        # high and low-pass filter recursive equations from original Pan-Tompkins paper (1985)
-        # low: y(nT) = 2y(nT - T) - y(nT - 2T) + x(nT) - 2x(nT - 6T) + x(nT - 12T)
-        y = signal.copy()
-        for index in range(len(signal)):
-            y[index] = signal[index]   # this is the +x(nT) term
-            # now add each term in turn with +=
-            if (index >= 1):
-                y[index] += 2 * y[index - 1]
-
-            if (index >= 2):
-                y[index] -= y[index - 2]
-
-            if (index >= 6):
-                y[index] -= 2 * signal[index - 6]
-
-            if (index >= 12):
-                y[index] += signal[index - 12]
-
-        result = y.copy()
-
-        # high: y(nT) = 32x(nT - 16T) - y(nT - T) - x(nT) + x(nT - 32T)
-        for index in range(len(signal)):
-            result[index] = -1 * y[index]   # -x(nT) term (x is now y for the second equation)
-            if (index >= 1):
-                result[index] -= result[index - 1]
-
-            if (index >= 16):
-                result[index] += 32 * y[index - 16]
-
-            if (index >= 32):
-                result[index] += y[index - 32]
-
-        # normalise the result
-        max_val = max(max(result),-min(result))
-        result = result/max_val
-
-        return result
+    Pan-Tompkins algorithm to produce mwin signal
     '''
 
-    def band_pass_filter(self, signal):
+    def __init__(self, fs):
+        self.fs = fs
 
-        result = None
+    def band_pass_filter(self, signal):
+        '''
+        Filter the ECG signal based on frequency of QRS complex
+        '''
 
         def butter_bandpass(lowcut, highcut, fs, order=5):
             nyquist = 0.5 * fs
@@ -123,24 +69,23 @@ class Pan_Tompkins_QRS():
             y = lfilter(b, a, data)
             return y
 
-        # Remember this is the frequency of the QRS complex... can't equate it to heartrate
+
         lowcut = 5  # Lower cutoff frequency (Hz)
         highcut = 15  # Upper cutoff frequency (Hz)
-        # Apply the bandpass filter
-        result = butter_bandpass_filter(signal, lowcut, highcut, fs)
+        result = butter_bandpass_filter(signal, lowcut, highcut, self.fs)
 
         return result
 
-    ######## TAKE DERIVATIVE
-    # purpose is to highlight the key parts of the signal where slope is steepest, hence taking out the noise between beats
-    # equation from paper: y(nT) = [-x(nT - 2T) - 2x(nT - T) + 2x(nT + T) + x(nT + 2T)]/(8T)
-    # ^finite difference equation
-
     def derivative(self, signal):
+        '''
+        Highlight parts of the signal where slope is steepest - ie QRS complex
+        y(nT) = [-x(nT - 2T) - 2x(nT - T) + 2x(nT + T) + x(nT + 2T)]/(8T)
+        '''
+
         result = signal.copy()
 
         for index in range(len(signal)):
-            result[index] = 0  # this is the starting point, since there is no x(nT) term this time
+            result[index] = 0  # starting point
 
             if (index >= 1):
                 result[index] = - 2 * signal[index - 1]  # -2x(nT - T)
@@ -150,34 +95,35 @@ class Pan_Tompkins_QRS():
 
             if (index >= 2 and index <= len(signal) - 2):
                 result[index] += 2 * signal[
-                    index + 1]  # 2x(nT + T) - must go up to len(signal) - 2 so it doesn't exceed the bounds of the signal since it's +T (leaving one final point)
+                    index + 1]  # 2x(nT + T)
 
             if (index >= 2 and index <= len(signal) - 3):
                 result[index] += signal[index + 2]  # x(nT + 2T)
 
-            result[index] = (result[index] * fs) / 8
+            result[index] = (result[index] * self.fs) / 8
 
         return result
 
-    ######## SQUARE THE SIGNAL
-    # intensify important part of the derivative signal and attenuate 'T' parts of the signal
-
     def squaring(self, signal):
+        '''
+        Intensify highest parts of the derivative signal and attenuate T-wave
+        '''
+
         result = signal.copy()
         for index in range(len(result)):
             result[index] = result[index] ** 2
 
         return result
 
-    ######## MOVING WINDOW INTEGRATOR
-    # 'soften' the curves of the squared signal, so the area of peaks (R waves) can easily be detected as humps
-    # y(nT) = [y(nT - (N-1)T) + x(nT - (N-2)T) + ... + x(nT)]/N
-
     def moving_window_integration(self, signal):
+        '''
+        Soften the curves of the squared signal to separate further the R-waves from the noise
+        y(nT) = [y(nT - (N-1)T) + x(nT - (N-2)T) + ... + x(nT)]/N
+        '''
 
         # Initialize result and window size for integration
         result = signal.copy()
-        window_size = round(0.15 * fs)
+        window_size = round(0.15 * self.fs)
         sum = 0
         # Calculate the sum for the first N terms
         for j in range(window_size):
@@ -193,7 +139,6 @@ class Pan_Tompkins_QRS():
         return result
 
     def solve(self, signal):
-        ### combine all of the above to spit out preprocessed signal
 
         # ensure input signal is numpy array
         if isinstance(signal, np.ndarray):
@@ -217,18 +162,14 @@ class Pan_Tompkins_QRS():
         global mwin
         mwin = self.moving_window_integration(sqr.copy())
 
-        return mwin
+        return mwin         # moving window integrated signal
 
-        ## mwin = moving window integrated signal
-
-
-
-
-
-######## PART 2: CALCULATE HEART RATE ########################################################################
 
 # define instance of the object
-class heart_rate():
+class Heart_Rate():
+    '''
+    Finds locations of the peaks in mwin signal
+    '''
 
     def __init__(self, signal, fs):
         '''
@@ -256,35 +197,38 @@ class heart_rate():
         self.RR_Missed_Limit = 0
         self.RR_Average1 = 0
 
-    def approx_peak(self):
+    def every_peak(self):
         '''
-        Approximate peak locations by finding local maxima (could be R peaks and T waves)
+        Find all local maxima as a first approximate step
         '''
 
-        # FFT convolution (not transforming into the frequency domain, but for simply processing the signal)
+        # further smooth signal via convolution
         slopes = sg.fftconvolve(self.m_win, np.full((25,), 1) / 25, mode='same')
 
-        # Finding approximate peak locations
+        # find every peak location
         for i in range(round(0.5 * self.fs) + 1, len(slopes) - 1):
             if (slopes[i] > slopes[i - 1]) and (slopes[i + 1] < slopes[i]):
                 self.peaks.append(i)
 
-    # THIS FUNCTION IS NOT ACTIVE - why did I choose to omit it?
-    def adjust_rr_interval(self, ind):
+        # plt.plot(slopes)
+        # plt.scatter(self.peaks, [slopes[i] for i in self.peaks], marker='x', color='red')
+        # plt.show()
+
+    def adjust_rr_interval(self, idx):
         '''
         Adjust RR Interval and Limits
-        :param ind: current index in peaks array
+        :param idx: current index in peaks array
         '''
 
         # Finding the eight most recent RR intervals
-        self.RR1 = np.diff(self.peaks[max(0, ind - 8): ind + 1]) / self.fs
+        self.RR1 = np.diff(self.peaks[max(0, idx - 8): idx + 1]) / self.fs
 
         # Calculating RR Averages
         self.RR_Average1 = np.mean(self.RR1)
         RR_Average2 = self.RR_Average1
 
         # Finding the eight most recent RR intervals lying between RR Low Limit and RR High Limit
-        if (ind >= 8):
+        if (idx >= 8):
             for i in range(0, 8):
                 if (self.RR_Low_Limit < self.RR1[i] < self.RR_High_Limit):
                     self.RR2.append(self.RR1[i])
@@ -294,7 +238,7 @@ class heart_rate():
                         RR_Average2 = np.mean(self.RR2)
 
         # Adjusting the RR Low Limit and RR High Limit
-        if (len(self.RR2) > 7 or ind < 8):
+        if (len(self.RR2) > 7 or idx < 8):
             self.RR_Low_Limit = 0.92 * RR_Average2
             self.RR_High_Limit = 1.16 * RR_Average2
             self.RR_Missed_Limit = 1.66 * RR_Average2
@@ -363,22 +307,22 @@ class heart_rate():
                         # Append the probable R peak location
                         self.r_locs.append(r_max)
 
-    def find_t_wave(self, peak_val, RRn, ind, prev_ind):
+    def find_t_wave(self, peak_val, RRn, idx, prev_idx):
 
         # now check if the idenfied potential missed beat is a T-wave instead of an R-wave
         '''
         T Wave Identification
         :param peak_val: peak location in consideration
         :param RRn: the most recent RR interval
-        :param ind: current index in peaks array
-        :param prev_ind: previous index in peaks array
+        :param idx: current index in peaks array
+        :param prev_idx: previous index in peaks array
         '''
         if (self.m_win[peak_val] >= self.Threshold_I1):
-            if (ind > 0 and 0.20 < RRn < 0.36):
+            if (idx > 0 and 0.20 < RRn < 0.36):
                 # Find the slope of current and last waveform detected
                 curr_slope = max(np.diff(self.m_win[peak_val - round(self.win_150ms / 2): peak_val + 1]))
                 last_slope = max(
-                    np.diff(self.m_win[self.peaks[prev_ind] - round(self.win_150ms / 2): self.peaks[prev_ind] + 1]))
+                    np.diff(self.m_win[self.peaks[prev_idx] - round(self.win_150ms / 2): self.peaks[prev_idx] + 1]))
 
                 # If current waveform slope is less than half of last waveform slope, it's a T wave
                 if (curr_slope < 0.5 * last_slope):
@@ -388,59 +332,59 @@ class heart_rate():
 
             if (not self.T_wave):
                 # T Wave is not found and update signal thresholds
-                if (self.probable_peaks[ind] > self.Threshold_F1):
+                if (self.probable_peaks[idx] > self.Threshold_F1):
                     self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
-                    self.SPKF = 0.125 * self.b_pass[ind] + 0.875 * self.SPKF
+                    self.SPKF = 0.125 * self.b_pass[idx] + 0.875 * self.SPKF
 
                     # Append the probable R peak location
-                    self.r_locs.append(self.probable_peaks[ind])
+                    self.r_locs.append(self.probable_peaks[idx])
 
                 else:
                     self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
-                    self.NPKF = 0.125 * self.b_pass[ind] + 0.875 * self.NPKF
+                    self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
                     # Update noise thresholds
         elif (self.m_win[peak_val] < self.Threshold_I1) or (
                 self.Threshold_I1 < self.m_win[peak_val] < self.Threshold_I2):
             self.NPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.NPKI
-            self.NPKF = 0.125 * self.b_pass[ind] + 0.875 * self.NPKF
+            self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
-    def adjust_thresholds(self, peak_val, ind):
+    def adjust_thresholds(self, peak_val, idx):
 
         # now we recalculate SPKI and NPKI on a GLOBAL scale
 
         '''
         Adjust Noise and Signal Thresholds During Learning Phase
         :param peak_val: peak location in consideration
-        :param ind: current index in peaks array
+        :param idx: current index in peaks array
         '''
 
         if (self.m_win[peak_val] >= self.Threshold_I1):
             # JB EDIT - if a m_win peak is above 10x the average, don't count in the threshold update
-            # it's counting the T-Waves as well, that's why... find a way to move T-Wave up
+            # it's counting the T-Waves as well, that's why... fidx a way to move T-Wave up
             if (self.m_win[peak_val] >= 10 * np.mean(self.m_win[:peak_val])):
                 pass
             else:
                 self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
 
-            if (self.probable_peaks[ind] > self.Threshold_F1):
+            if (self.probable_peaks[idx] > self.Threshold_F1):
 
-                self.SPKF = 0.125 * self.b_pass[ind] + 0.875 * self.SPKF
+                self.SPKF = 0.125 * self.b_pass[idx] + 0.875 * self.SPKF
 
                 # Append the probable R peak location
-                self.r_locs.append(self.probable_peaks[ind])
+                self.r_locs.append(self.probable_peaks[idx])
 
             else:
                 # Update noise threshold
-                self.NPKF = 0.125 * self.b_pass[ind] + 0.875 * self.NPKF
+                self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
                 # Update noise thresholds
         elif (self.m_win[peak_val] < self.Threshold_I2) or (
                 self.Threshold_I2 < self.m_win[peak_val] < self.Threshold_I1):
             self.NPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.NPKI
-            self.NPKF = 0.125 * self.b_pass[ind] + 0.875 * self.NPKF
+            self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
-        # print(np.mean(self.probable_peaks[ind]))
+        # print(np.mean(self.probable_peaks[idx]))
 
     def update_thresholds(self):
 
@@ -520,22 +464,25 @@ class heart_rate():
         R Peak Detection
         '''
 
-        # Find approx peak location estimations using the mwin signal
-        self.approx_peak()
+        # find every local maximum in smoothed mwin signal
+        self.every_peak()
 
-        for ind in range(len(self.peaks)):
+        # iterate through local maxima
+        for idx in range(len(self.peaks)):
 
-            # In the areas of the approximations, set up a search window
-            peak_val = self.peaks[ind]
-            win_300ms = np.arange(max(0, self.peaks[ind] - self.win_150ms),
-                                  min(self.peaks[ind] + self.win_150ms, len(self.b_pass) - 1), 1)
-            max_val = max(self.b_pass[win_300ms], default=0)
+            # for each local maximum, set up a search window - giving approximate peak regions
+            peak_val = self.peaks[idx]
+            win_300ms = np.arange(max(0, self.peaks[idx] - self.win_150ms), min(self.peaks[idx] + self.win_150ms, len(self.b_pass) - 1), 1)
+            max_val = max(self.b_pass[win_300ms], default=0)        # returns maximum value in the search window
 
-            # Find the x location of the max peak value within this window to get 'true' peak
-            # This is in the BPASS SIGNAL, not mwin
+            # use the approximate peak regions to find the peak locations in the bandpassed (original) signal
             if (max_val != 0):
                 x_coord = np.asarray(self.b_pass == max_val).nonzero()
                 self.probable_peaks.append(x_coord[0][0])
+
+            if (idx < len(self.probable_peaks) and idx != 0):
+                # Adjust RR interval and limits
+                self.adjust_rr_interval(idx)
 
             # Adjust RR interval thresholds in case of irregular beats
             if (self.RR_Average1 < self.RR_Low_Limit or self.RR_Average1 > self.RR_Missed_Limit):
@@ -548,11 +495,11 @@ class heart_rate():
                 self.searchback(peak_val, RRn, round(RRn * self.fs))
 
                 # Confirm the searchback isn't picking up T-waves instead of R peaks
-                self.find_t_wave(peak_val, RRn, ind, ind - 1)
+                self.find_t_wave(peak_val, RRn, idx, idx - 1)
 
             else:
                 # Adjust SPKI and NPKI
-                self.adjust_thresholds(peak_val, ind)
+                self.adjust_thresholds(peak_val, idx)
 
             # Update Thresholds
             self.update_thresholds()
@@ -568,91 +515,98 @@ class heart_rate():
 
 ######## PRESENTING DATA ########################################################################
 
-# Convert ecg signal to numpy array
+def plot_data():
+    # Convert ecg signal to numpy array
 
-if isinstance(ecg, np.ndarray):
-    signal = ecg
-else:
-    signal = ecg.to_numpy()
+    if isinstance(ecg, np.ndarray):
+        signal = ecg
+    else:
+        signal = ecg.to_numpy()
 
-# Find the R peak locations
-hr = heart_rate(signal, fs)
-result, probable_peaks, r_locs = hr.find_r_peaks()
-result = np.array(result)
-probable_peaks = np.array(probable_peaks)
+    # Find the R peak locations
+    hr = heart_rate(signal, fs)
+    result, probable_peaks, r_locs = hr.find_r_peaks()
+    result = np.array(result)
+    probable_peaks = np.array(probable_peaks)
 
-# Clip the x locations less than 0 (Learning Phase)
-result = result[result > 0]
+    # Clip the x locations less than 0 (Learning Phase)
+    result = result[result > 0]
 
-# Calculate the overall heart rate
-heartRate = (60 * fs) / np.average(np.diff(result[1:]))
-print("Heart Rate", heartRate, "BPM")
+    # Calculate the overall heart rate
+    heartRate = (60 * fs) / np.average(np.diff(result[1:]))
+    print("Heart Rate", heartRate, "BPM")
 
-### set up the sliding 8 second window for model prep
-window_size = 8 * fs  # 8-second window size
-step_size = 2 * fs  # 2-second step size
-heart_rates = []
-rmssd_values = []
-rr_intervals_matrix = []
+    ### set up the sliding 8 second window for model prep
+    window_size = 8 * fs  # 8-second window size
+    step_size = 2 * fs  # 2-second step size
+    heart_rates = []
+    rmssd_values = []
+    rr_intervals_matrix = []
 
-for i in range(0, len(signal) - window_size + 1, step_size):
-    window_r_peaks = [peak for peak in result if i <= peak < i + window_size]
-    # ^ 'list comprehension' - remember this format
+    for i in range(0, len(signal) - window_size + 1, step_size):
+        window_r_peaks = [peak for peak in result if i <= peak < i + window_size]
+        # ^ 'list comprehension' - remember this format
 
-    if len(window_r_peaks) >= 2:
-        window_bpm = (60 * fs) / np.average(np.diff(window_r_peaks))
-        heart_rates.append(window_bpm)
+        if len(window_r_peaks) >= 2:
+            window_bpm = (60 * fs) / np.average(np.diff(window_r_peaks))
+            heart_rates.append(window_bpm)
 
-        rr_intervals = np.diff(window_r_peaks)  # convert to ms
-        rr_intervals = rr_intervals * 1000 / fs
-        rr_intervals_matrix.append(rr_intervals)
+            rr_intervals = np.diff(window_r_peaks)  # convert to ms
+            rr_intervals = rr_intervals * 1000 / fs
+            rr_intervals_matrix.append(rr_intervals)
 
-        rmssd = np.sqrt(np.mean(np.diff(rr_intervals) ** 2))
-        rmssd_values.append(rmssd)
+            rmssd = np.sqrt(np.mean(np.diff(rr_intervals) ** 2))
+            rmssd_values.append(rmssd)
 
-# SAVE HEARTRATES TO EXTERNAL FILE
-# with open(session + '_heart_rate_wesad.pkl', 'wb') as file:
-#     pickle.dump(heart_rates, file)
+    # SAVE HEARTRATES TO EXTERNAL FILE
+    # with open(session + '_heart_rate_wesad.pkl', 'wb') as file:
+    #     pickle.dump(heart_rates, file)
 
 
-'''
-output_csv_file = 'OUTPUT.csv'
-try:
-    with open(output_csv_file, 'w', newline='') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        csvwriter.writerows(rr_intervals_matrix)
-except Exception as e:
-    print(f"An error occurred: {e}")
-'''
+    '''
+    output_csv_file = 'OUTPUT.csv'
+    try:
+        with open(output_csv_file, 'w', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile)
+            csvwriter.writerows(rr_intervals_matrix)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    '''
 
-rr_intervals = np.diff(result)
-# plt.plot(rmssd_values)
-# plt.plot(rmssd_values)
-plt.plot(heart_rates, color='black')
-plt.show()
+    rr_intervals = np.diff(result)
+    # plt.plot(rmssd_values)
+    # plt.plot(rmssd_values)
+    plt.plot(heart_rates, color='black')
+    plt.show()
 
-plt.plot(signal, color='blue')
-plt.scatter(result, signal[result], color='red', s=50, marker='*')
-for i, (xi, yi) in enumerate(zip(result, signal[result])):
-    plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
+    plt.plot(signal, color='blue')
+    plt.scatter(result, signal[result], color='red', s=50, marker='*')
+    for i, (xi, yi) in enumerate(zip(result, signal[result])):
+        plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
 
-## Check each stage (signal, bpass, der, sqr, mwin)
-# plt.plot(bpass, color = 'red')
-# plt.plot(der / 100, color = 'black')
-# plt.plot(sqr / 10000000, color = 'black')
-# plt.plot(mwin / 1000000, color = 'black')
-# for peak in probable_peaks:
-#     plt.axvline(x=peak, color='r', linestyle='--')
+    ## Check each stage (signal, bpass, der, sqr, mwin)
+    # plt.plot(bpass, color = 'red')
+    # plt.plot(der / 100, color = 'black')
+    # plt.plot(sqr / 10000000, color = 'black')
+    # plt.plot(mwin / 1000000, color = 'black')
+    # for peak in probable_peaks:
+    #     plt.axvline(x=peak, color='r', linestyle='--')
 
-plt.show()
+    plt.show()
 
-def main():
+def main(ecg,fs):
 
-    
+    print(ecg.shape)
 
-    # create instance & run peak detection
-    QRS_detector = Pan_Tompkins_QRS()
-    output_signal = QRS_detector.solve(ecg)
+    # produce mwin signal
+    mwin = Pan_Tompkins_QRS(fs=fs).solve(ecg)
+    # plt.plot(mwin)
+    # plt.show()
+
+    # find locations of peaks
+    Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
+
+
 
 if __name__ == '__main__':
     main()
