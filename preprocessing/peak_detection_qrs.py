@@ -504,10 +504,6 @@ def main(ecg,fs):
     # find locations of peaks
     result, r_locs, probable = Heart_Rate(signal=ecg, fs=fs).find_r_peaks()
 
-    print(result.shape)
-    print(r_locs.shape)
-    print(probable.shape)
-
     # create HR labels by windowing ECG
     window_size = 8*fs
     step_size = 2*fs
@@ -516,8 +512,10 @@ def main(ecg,fs):
     # plot peaks
     plot_peaks(ecg, result, r_locs, probable)
     # plot heartrate
-    plt.plot(labels)
-    plt.show()
+    # plt.plot(labels)
+    # plt.show()
+
+    return labels
 
 
 if __name__ == '__main__':

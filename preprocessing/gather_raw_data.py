@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import os
 import psycopg2
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, resample
 import wfdb
 import matplotlib.pyplot as plt
 import peak_detection_qrs
@@ -115,16 +115,21 @@ def save_ppg_dalia(dir, conn, cur):
             activity = data['activity']
             label = data['label']  # ground truth EEG
 
+            print(ppg.shape)                            # (n_samples, 1)
+            print(acc.shape)                            # (n_samples, 3)
+            print(activity.shape)                       # (n_samples, 1)
+            print(label.shape)                          # (n_samples,)
+
             # alignment corrections & filter data for consistency
             ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
             acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
             activity = activity[:-1].T
             label = label[:-1]
 
-            # print(ppg.shape)
-            # print(acc.shape)
-            # print(activity.shape)
-            # print(label.shape)
+            print(ppg.shape)                            # (1, n_samples)
+            print(acc.shape)                            # (3, n_samples)
+            print(activity.shape)                       # (1, n_samples)
+            print(label.shape)                          # (n_samples,)
 
             # add to dictionary and window
             window_dict = {
@@ -169,7 +174,6 @@ def save_wrist_ppg(dir, conn, cur):
 
     dataset = 'wrist_ppg'
 
-
     # iterate through session files
     sessions = [f for f in os.listdir(f'{dir}/wrist+ppg') if f.endswith('.hea')]
 
@@ -180,15 +184,39 @@ def save_wrist_ppg(dir, conn, cur):
         record = wfdb.rdrecord(f'{dir}/wrist+ppg/{s}')
         print(f'extracting: {dataset}, {s}')
 
-        # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer, 12 = labels
+        # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer
+        # all recorded at 256Hz (downsample to 32Hz)
         ecg = record.adc()[:,0]
-        ppg = record.adc()[:, 1]
-        x = record.adc()[:, 5]
-        y = record.adc()[:, 6]
-        z = record.adc()[:, 7]
-        labels = record.adc()[:,12]
-        print(len(labels))
+        ppg = np.expand_dims(record.adc()[:, 1][::8], axis=-1)
+        acc = np.stack((record.adc()[:, 5][::8], record.adc()[:, 6][::8], record.adc()[:, 7][::8]), axis=-1)
 
+        print(ppg.shape)  # (n_samples, 1)
+        print(acc.shape)  # (n_samples, 3)
+
+        plt.plot(ppg[:,0])
+
+        ppg = butter_filter(signal=ppg.T, btype='bandpass', lowcut=0.5, highcut=15)
+        acc = butter_filter(signal=acc.T, btype='lowpass', highcut=15)
+
+        plt.plot(ppg[0,:])
+        plt.show()
+
+        print(ppg.shape)  # (1, n_samples)
+        print(acc.shape)  # (3, n_samples)
+
+        label = peak_detection_qrs.main(ecg=ecg,fs=256)
+
+        # add to dictionary and window
+        window_dict = {
+            'ppg': ppg,
+            'acc': acc,
+            'label': label
+        }
+        window_dict = window_data(window_dict)
+
+        print(window_dict['ppg'].shape)
+        print(window_dict['acc'].shape)
+        print(window_dict['label'].shape)
 
         # print(ecg.shape)
         # print(ppg.shape)
@@ -216,7 +244,6 @@ def save_wrist_ppg(dir, conn, cur):
     # time_analyse_seconds = len(ppg_data) / fs_ppg  # this is the total time in seconds
 
 
-## TRAINING DATASET 3 - preprocessing WESAD
 def preprocess_data_wesad(session_name):
 
     ppg_file = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session_name+'/'+session_name+'_E4_Data/BVP.csv'
