@@ -499,6 +499,7 @@ def main(ecg,fs):
 
     # produce mwin signal
     mwin = Pan_Tompkins_QRS(fs=fs).solve(ecg)
+    print(f'mwin signal produced')
     # find locations of peaks
     result, r_locs, probable = Heart_Rate(signal=ecg, fs=fs).find_r_peaks()
 
@@ -509,8 +510,8 @@ def main(ecg,fs):
 
     # plot peaks & heartrate
     # plot_peaks(ecg, result, r_locs, probable)
-    plt.plot(labels)
-    plt.show()
+    # plt.plot(labels)
+    # plt.show()
 
     return np.array(labels)
 

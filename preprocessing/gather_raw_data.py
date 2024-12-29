@@ -177,6 +177,8 @@ def save_ppg_dalia(dir, conn, cur):
             conn.commit()
             print(f'saved: {dataset}, {s}')
 
+            return
+
 
 def save_wrist_ppg(dir, conn, cur):
     '''
@@ -210,8 +212,8 @@ def save_wrist_ppg(dir, conn, cur):
         plt.plot(acc[1, :])
         plt.show()
 
-        # print(ppg.shape)  # (1, n_samples)
-        # print(acc.shape)  # (3, n_samples)
+        print(ppg.shape)  # (1, n_samples)
+        print(acc.shape)  # (3, n_samples)
 
         # generate labels using peak detection algorithm on ECG
         label = peak_detection_qrs.main(ecg=ecg,fs=256)
@@ -259,6 +261,8 @@ def save_wrist_ppg(dir, conn, cur):
         conn.commit()
         print(f'saved: {dataset}, {s}')
 
+        return
+
 
 def save_wesad(dir, conn, cur):
     '''
@@ -280,43 +284,55 @@ def save_wesad(dir, conn, cur):
             # get raw data from pkl file
             ppg = data['signal']['wrist']['BVP'][::2]  # downsample PPG to match fs_acc
             acc = data['signal']['wrist']['ACC']
-            ecg = data['signal']['chest']['ECG']
+            ecg = np.squeeze(data['signal']['chest']['ECG'][::7])  # downsample for efficiency
 
             ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
             acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
 
-            print(ppg.shape)
-            print(acc.shape)
-            print(ecg.shape)
+            # plt.plot(acc[1, :])
+            # plt.show()
 
             # generate labels using peak detection algorithm on ECG
-            label = peak_detection_qrs.main(ecg=ecg,fs=700)
+            label = peak_detection_qrs.main(ecg=ecg,fs=100)
 
+            print(ppg.shape)                            # (1, n_samples)
+            print(acc.shape)                            # (3, n_samples)
+            print(label.shape)                          # (n_samples,)
 
+            # add to dictionary and window
+            window_dict = {
+                'ppg': ppg,
+                'acc': acc,
+                'label': label
+            }
+            window_dict = window_data(window_dict)
 
-    ppg_file = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session_name+'/'+session_name+'_E4_Data/BVP.csv'
-    acc_file = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session_name+'/'+session_name+'_E4_Data/ACC.csv'
+            print(window_dict['ppg'].shape)  # (n_samples, 256)
+            print(window_dict['acc'].shape)  # (n_samples, 3, 256)
+            print(window_dict['label'].shape)  # (n_samples,)
 
-    df_ppg = pd.read_csv(ppg_file)
-    ppg_data = df_ppg.iloc[1:, 0]
-    df_acc = pd.read_csv(acc_file)
-    x_data = df_acc.iloc[1:, 0]
-    y_data = df_acc.iloc[1:, 1]
-    z_data = df_acc.iloc[1:, 2]
-    print(len(ppg_data))
-    print(len(x_data))
+            # # Insert into the SQL database
+            # rows = [
+            #     (
+            #         dataset,
+            #         s,
+            #         window_dict['ppg'][i, :].tolist(),
+            #         window_dict['acc'][i, :, :].tolist(),
+            #         int(7),                             # set activity to working at desk
+            #         window_dict['label'][i]
+            #     )
+            #     for i in range(len(label))
+            # ]
+            #
+            # cur.executemany("""
+            #     INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+            #     VALUES (%s, %s, %s, %s, %s, %s)
+            # """, rows)
+            #
+            # conn.commit()
+            # print(f'saved: {dataset}, {s}')
 
-    with open('/Users/jamborghini/Documents/PYTHON/Fatigue Model/' + session_name +'_heart_rate_wesad.pkl', 'rb') as file:
-        ecg_ground_truth = pickle.load(file, encoding='latin1')
-
-    fs_ppg = 64  # Hz
-    fs_acc = 32  # Hz
-    num_ppg = len(ppg_data)
-    num_acc = len(x_data)
-    time_analyse_seconds = len(ppg_data) / fs_ppg  # this is the total time in seconds
-    print(time_analyse_seconds)
-
-    return ppg_data, x_data, y_data, z_data, ecg_ground_truth, fs_ppg, fs_acc, num_ppg, num_acc
+            return
 
 
 def main():
