@@ -15,35 +15,6 @@ import subprocess
 import wfdb
 import csv
 
-
-'''
-### input format 2 - WESAD
-
-session = 'S2'
-file_name = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session+'/'+session+'.pkl'
-
-with open(file_name, 'rb') as file:
-    data = pickle.load(file, encoding='latin1')
-ecg = data['signal']['chest']['ECG']
-ecg = np.squeeze(ecg)
-
-fs = 700
-time = len(ecg) / fs
-print(time)
-print(ecg.shape)
-
-
-### input format 3 - pulse transit time dataset
-csv_file = '/Users/jamborghini/Documents/PYTHON/TRAINING_DATA_PULSE_TRANSIT_TIME_PPG_DATASET/csv/s6_walk.csv'
-df = pd.read_csv(csv_file)
-ecg = df['ecg']
-print(ecg)
-print(len(ecg))
-fs = 500  # sampling rate (Hz)
-time = len(ecg) / fs
-'''
-
-
 class Pan_Tompkins_QRS():
     '''
     Pan-Tompkins algorithm to produce mwin signal
@@ -163,7 +134,6 @@ class Pan_Tompkins_QRS():
         mwin = self.moving_window_integration(sqr.copy())
 
         return mwin         # moving window integrated signal
-
 
 # define instance of the object
 class Heart_Rate():
@@ -427,9 +397,12 @@ class Heart_Rate():
             if (x_max is not None):
                 self.result.append(x_max)
 
-    ### custom formula that makes sure no wrong peaks are detected, by checking the rr_interval is not unrealistically low
-    # problem is that this wouldn't detect any heart problems....
     def final_check(self):
+        '''
+        Checks for exceedingly fast heartrate
+        Potential drawback is it would miss certain heart conditions
+        '''
+
         min_rr_interval_ms = 250  # Set the minimum RR interval to 250 ms (240bpm)
 
         # Initialize a list to store the final R peaks
@@ -441,7 +414,7 @@ class Heart_Rate():
                 rr_interval = (self.result[i] - self.result[i - 1]) / self.fs
                 rr_interval_ms = rr_interval * 1000  # Convert RR interval to milliseconds
 
-                # Check if the RR interval is greater than or equal to the minimum allowed (300 ms)
+                # Check if the RR interval is greater than or equal to the minimum allowed
                 if rr_interval_ms >= min_rr_interval_ms:
                     final_r_peaks.append(self.result[i])
 
@@ -495,8 +468,8 @@ class Heart_Rate():
         # Searchback in ECG signal
         self.ecg_searchback()
 
-        # Custom formula that removes stupid-low RR-intervals
-        # self.final_check()
+        # Custom formula that removes extremely low spurious RR intervals
+        self.final_check()
 
         return np.array(self.result).astype(int), self.r_locs, np.array(self.probable_peaks).astype(int)
 
@@ -504,20 +477,12 @@ class Heart_Rate():
 
 def plot_peaks(signal, result, r_locs, probable):
 
-    # plt.plot(signal, color='blue')
-    # plt.scatter(result, signal[result], color='red', s=50, marker='*')
-    # # for i, (xi, yi) in enumerate(zip(result, signal[result])):
-    # #     plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
-
-    # plt.plot(bpass, color = 'red')
-    # plt.plot(der / 100, color = 'black')
-    # plt.plot(sqr / 10000000, color = 'black')
-    # plt.plot(mwin / 1000000, color = 'black')
-    # for peak in probable_peaks:
-    #     plt.axvline(x=peak, color='r', linestyle='--')
+    plt.plot(signal, color='blue')
+    plt.scatter(result, signal[result], color='red', s=50, marker='*')
+    # for i, (xi, yi) in enumerate(zip(result, signal[result])):
+    #     plt.text(xi, yi, str(i), fontsize=12, ha='center', va='bottom')
 
     plt.show()
-
 
 def main(ecg,fs):
 
@@ -531,11 +496,12 @@ def main(ecg,fs):
     # find locations of peaks
     result, r_locs, probable = Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
 
-    # plot results
     print(result.shape)
     print(r_locs.shape)
     print(probable.shape)
-    plot_peaks(ecg, result, r_locs, probable)
+
+    # plot results
+    # plot_peaks(ecg, result, r_locs, probable)
 
 
 if __name__ == '__main__':
