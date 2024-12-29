@@ -41,7 +41,7 @@ def window_data(window_dict):
     Segment data into windows of 8 seconds with 2 second overlap. Only used when saving down raw data for first time
     :param window_dict: dictionary with all signals in arrays for given session
     :return: dictionary of windowed signals containing X and Y data
-        ppg.shape = (n_windows, 1, 256)
+        ppg.shape = (n_windows, 256)
         acc.shape = (n_windows, 3, 256)
         labels.shape = (n_windows,)
         activity.shape = (n_windows,)
@@ -64,14 +64,15 @@ def window_data(window_dict):
         data = window_dict[k]
 
         if k == 'ppg':
-            # (1, n_samples) -> (n_windows, 1, 256)
-            window_dict[k] = np.zeros((n_windows, 1, window))
+            # (1, n_samples) -> (n_windows, 256)
+            window_dict[k] = np.zeros((n_windows, window))
             for i in range(n_windows):
                 start = i * step
                 end = start + window
-                window_dict[k][i, :, :] = data[:, start:end]
+                window_dict[k][i, :] = data[:, start:end]
 
         if k == 'acc':
+            # (3, n_samples) -> (n_windows, 3, 256)
             window_dict[k] = np.zeros((n_windows, 3, window))
             for i in range(n_windows):
                 start = i * step
@@ -88,7 +89,7 @@ def window_data(window_dict):
     return window_dict
 
 
-def save_ppg_dalia(dir, cur):
+def save_ppg_dalia(dir, conn, cur):
     '''
     ## TRAINING DATASET 1 - PPG-Dalia
     '''
@@ -101,7 +102,7 @@ def save_ppg_dalia(dir, cur):
             continue
         with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'saving {s}')
+            print(f'extracting {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -138,26 +139,24 @@ def save_ppg_dalia(dir, cur):
 
             rows = [
                 (
-                    dataset,  # Dataset name
-                    s,  # Session identifier
-                    ppg[i],  # PPG value
-                    acc[i],  # Accelerometer data as an array
-                    activity[i],  # Activity label
-                    label[i]  # Classification label
+                    dataset,
+                    s,
+                    window_dict['ppg'][i,:].tolist(),
+                    window_dict['acc'][i,:,:].tolist(),
+                    int(window_dict['activity'][i]),
+                    window_dict['label'][i]
                 )
                 for i in range(len(label))
             ]
 
-            print(rows)
-
             # Insert into the SQL database
-            cur.execute("""
-                INSERT INTO sensor_data (dataset, session_number, ppg, acc)
-                VALUES (%s, %s, %s, %s)
-            """, (dataset, s, ppg, acc))
+            cur.executemany("""
+                INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, rows)
 
             conn.commit()
-            print(f'Inserted session: {s}')
+            print(f'inserted {s}')
 
 
 
@@ -236,7 +235,7 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = root_dir+'/raw_data'
 
-    save_ppg_dalia(data_dir, cur)
+    save_ppg_dalia(data_dir, conn, cur)
 
 
 if __name__ == '__main__':
