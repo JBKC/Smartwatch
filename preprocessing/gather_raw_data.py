@@ -12,6 +12,18 @@ import wfdb
 import matplotlib.pyplot as plt
 import peak_detection_qrs
 
+activity_mapping = {
+    0: "sitting still",
+    1: "stairs",
+    2: "table football",
+    3: "cycling",
+    4: "driving",
+    5: "lunch break",
+    6: "walking",
+    7: "working at desk",
+    8: "running"
+}
+
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
     """
     Applies Butterworth filter
@@ -146,6 +158,7 @@ def save_ppg_dalia(dir, conn, cur):
             print(window_dict['activity'].shape)        # (n_samples,)
             print(window_dict['label'].shape)           # (n_samples,)
 
+            # Insert into the SQL database
             rows = [
                 (
                     dataset,
@@ -158,7 +171,6 @@ def save_ppg_dalia(dir, conn, cur):
                 for i in range(len(label))
             ]
 
-            # Insert into the SQL database
             cur.executemany("""
                 INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -215,30 +227,36 @@ def save_wrist_ppg(dir, conn, cur):
         print(window_dict['acc'].shape)  # (n_samples, 3, 256)
         print(window_dict['label'].shape)  # (n_samples,)
 
-        # print(ecg.shape)
-        # print(ppg.shape)
-        # print(x.shape)
-        # print(y.shape)
-        # print(z.shape)
+        # activity mapping
+        if "bike" in s.lower():
+            activity = 3
+        elif "walk" in s.lower():
+            activity = 6
+        elif "run" in s.lower():
+            activity = 8
 
-        # generate HR labels using peak detection on ECG signal
-        # peak_detection_qrs.main(ecg,fs=256)
+        print(int(activity))
 
-        # plt.plot(ecg)
-        # plt.show()
-        # plt.plot(ppg)
-        # plt.show()
+        # Insert into the SQL database
+        rows = [
+            (
+                dataset,
+                s,
+                window_dict['ppg'][i, :].tolist(),
+                window_dict['acc'][i, :, :].tolist(),
+                int(activity),
+                window_dict['label'][i]
+            )
+            for i in range(len(label))
+        ]
 
+        cur.executemany("""
+            INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, rows)
 
-
-    # with open('/Users/jamborghini/Documents/PYTHON/Fatigue Model/' + session_name +'_heart_rate_wrist_ppg.pkl', 'rb') as file:
-    #     ecg_ground_truth = pickle.load(file, encoding='latin1')
-    #
-    # fs_ppg = 256  # from the paper
-    # fs_acc = 256
-    # num_ppg = len(ppg_data)
-    # num_acc = len(x_data)
-    # time_analyse_seconds = len(ppg_data) / fs_ppg  # this is the total time in seconds
+        conn.commit()
+        print(f'saved: {dataset}, {s}')
 
 
 def preprocess_data_wesad(session_name):
@@ -284,8 +302,8 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = root_dir+'/raw_data'
 
-    # save_ppg_dalia(data_dir, conn, cur)
-    save_wrist_ppg(data_dir, conn, cur)
+    save_ppg_dalia(data_dir, conn, cur)
+    # save_wrist_ppg(data_dir, conn, cur)
 
 
 if __name__ == '__main__':
