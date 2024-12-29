@@ -103,8 +103,6 @@ def window_data(window_dict):
 
     return window_dict
 
-
-
 def save_ppg_dalia(dir, conn, cur):
     '''
     ## TRAINING DATASET 1 - PPG-Dalia
@@ -209,6 +207,9 @@ def save_wrist_ppg(dir, conn, cur):
         ppg = butter_filter(signal=ppg.T, btype='bandpass', lowcut=0.5, highcut=15)
         acc = butter_filter(signal=acc.T, btype='lowpass', highcut=15)
 
+        plt.plot(acc[1, :])
+        plt.show()
+
         # print(ppg.shape)  # (1, n_samples)
         # print(acc.shape)  # (3, n_samples)
 
@@ -259,7 +260,39 @@ def save_wrist_ppg(dir, conn, cur):
         print(f'saved: {dataset}, {s}')
 
 
-def preprocess_data_wesad(session_name):
+def save_wesad(dir, conn, cur):
+    '''
+    ## TRAINING DATASET 3 - PPG-Dalia
+    '''
+
+    dataset = 'wesad'
+
+    # iterate through sessions
+    for s in os.listdir(f'{dir}/wesad'):
+        if s == '.DS_Store':  # Skip .DS_Store
+            continue
+        with open(f'{dir}/wesad/{s}/{s}.pkl', 'rb') as file:
+
+            print(f'extracting: {dataset}, {s}')
+
+            data = pickle.load(file, encoding='latin1')
+
+            # get raw data from pkl file
+            ppg = data['signal']['wrist']['BVP'][::2]  # downsample PPG to match fs_acc
+            acc = data['signal']['wrist']['ACC']
+            ecg = data['signal']['chest']['ECG']
+
+            ppg = butter_filter(signal=ppg[38:].T, btype='bandpass', lowcut=0.5, highcut=15)
+            acc = butter_filter(signal=acc[:-38, :].T, btype='lowpass', highcut=15)
+
+            print(ppg.shape)
+            print(acc.shape)
+            print(ecg.shape)
+
+            # generate labels using peak detection algorithm on ECG
+            label = peak_detection_qrs.main(ecg=ecg,fs=700)
+
+
 
     ppg_file = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session_name+'/'+session_name+'_E4_Data/BVP.csv'
     acc_file = '/Users/jamborghini/Documents/PYTHON/TRAINING DATA - WESAD/'+session_name+'/'+session_name+'_E4_Data/ACC.csv'
@@ -302,8 +335,9 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = root_dir+'/raw_data'
 
-    save_ppg_dalia(data_dir, conn, cur)
+    # save_ppg_dalia(data_dir, conn, cur)
     # save_wrist_ppg(data_dir, conn, cur)
+    save_wesad(data_dir, conn, cur)
 
 
 if __name__ == '__main__':

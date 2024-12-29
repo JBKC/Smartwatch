@@ -509,8 +509,8 @@ def main(ecg,fs):
 
     # plot peaks & heartrate
     # plot_peaks(ecg, result, r_locs, probable)
-    # plt.plot(labels)
-    # plt.show()
+    plt.plot(labels)
+    plt.show()
 
     return np.array(labels)
 
