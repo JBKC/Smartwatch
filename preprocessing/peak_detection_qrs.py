@@ -181,20 +181,21 @@ class Heart_Rate():
         # RR2 = list of last 8 RR intervals within an acceptable range
         # peaks = list of all local maxima
         # probable_peaks = list of peaks found from local maxima regions on bandpass filtered signal
-        # r_locs =
+        # r_locs = finalised locations of R peaks in bandpassed signal
+        # result = actual location of R peaks on raw ECG signal
         self.RR1, self.RR2, self.peaks, self.probable_peaks, self.r_locs, self.result = ([] for _ in range(6))
 
-        # SPKI = running estimate of R peak == highest peak that falls within RR window
-        # NPKI = running estimate of noise peak == highest peak that falls within lower threshold
-        # Threshold_I1 = first threshold applied to mwin signal
-        # Threshold_I2 = second threshold applied to mwin signal
-        # SPKF =
-        # NPKF =
+        # SPKI = running estimate of R peak in mwin signal == highest peak that falls within RR window
+        # NPKI = running estimate of noise peak in mwin signal == highest peak that falls within lower threshold
+        # Threshold_I1 = higher threshold applied to mwin signal - above this threshold it's likely an R peak
+        # Threshold_I2 = lower threshold applied to mwin signal - above this and it may be noise
+        # SPKF = running estimate of R peak in bandpass signal
+        # NPKF = running estimate of noise peak in bandpass signal
         # Threshold_F1 = first threshold applied to bandpass signal
         # Threshold_F2 = second threshold applied to bandpass signal
         self.SPKI, self.NPKI, self.Threshold_I1, self.Threshold_I2, self.SPKF, self.NPKF, self.Threshold_F1, self.Threshold_F2 = (
         0 for _ in range(8))
-        
+
         self.T_wave = False
         self.m_win = mwin
         self.b_pass = bpass
@@ -264,13 +265,13 @@ class Heart_Rate():
 
         # Check if the most recent RR interval is greater than the RR Missed Limit (implying a missed peak)
         if (RRn > self.RR_Missed_Limit):
-            # Create searchback window of size RRn
+            # Create searchback window of size RRn in mwin
             win_rr = self.m_win[peak_val - sb_win + 1: peak_val + 1]
 
             # Find the x locations inside the window having y values greater than Threshold I1
             coord = np.asarray(win_rr > self.Threshold_I1).nonzero()[0]
 
-            # Find the x location of the max peak value in the search window
+            # Find the x location of the max peak value in the search window within mwin signal
             if (len(coord) > 0):
                 for pos in coord:
                     if (win_rr[pos] == max(win_rr[coord])):
@@ -279,17 +280,13 @@ class Heart_Rate():
             else:
                 x_max = None
 
-            # If the max peak value is found
             if (x_max is not None):
-                # Update the thresholds corresponding to moving window integration
-                # Update SPKI and other thresholds
+                # Update mwin thresholds based on this new max peak
                 self.SPKI = 0.25 * self.m_win[x_max] + 0.75 * self.SPKI
                 self.Threshold_I1 = self.NPKI + 0.25 * (self.SPKI - self.NPKI)
                 self.Threshold_I2 = 0.5 * self.Threshold_I1
 
-                # Round 2 - search in bandpass
-                # only searches if a mwin peak has been found for confirmation (computational savings)
-                # Initialize a window to searchback
+                # now search bandpass signal
                 win_rr = self.b_pass[x_max - self.win_150ms: min(len(self.b_pass) - 1, x_max)]
 
                 # Find the x locations inside the window having y values greater than Threshold F1
@@ -304,7 +301,6 @@ class Heart_Rate():
                 else:
                     r_max = None
 
-                # If the max peak value is found
                 if (r_max is not None):
                     # Update the thresholds corresponding to bandpass filter
                     if self.b_pass[r_max] > self.Threshold_F2:
@@ -312,68 +308,70 @@ class Heart_Rate():
                         self.Threshold_F1 = self.NPKF + 0.25 * (self.SPKF - self.NPKF)
                         self.Threshold_F2 = 0.5 * self.Threshold_F1
 
-                        # Append the probable R peak location
-                        self.r_locs.append(r_max)
+                        # Append the location of probable missed peak
+                        self.probable_peaks.append(r_max)
 
     def find_t_wave(self, peak_val, RRn, idx, prev_idx):
-
-        # now check if the idenfied potential missed beat is a T-wave instead of an R-wave
         '''
-        T Wave Identification
+        Take probable missed peak found during searchback and ensure it isn't a T-wave
         :param peak_val: peak location in consideration
         :param RRn: the most recent RR interval
         :param idx: current index in peaks array
         :param prev_idx: previous index in peaks array
         '''
+
         if (self.m_win[peak_val] >= self.Threshold_I1):
-            if (idx > 0 and 0.20 < RRn < 0.36):
+
+            # set reasonable interval range for T-waves
+            if (idx > 0 and 0.10 < RRn < 0.30):
                 # Find the slope of current and last waveform detected
                 curr_slope = max(np.diff(self.m_win[peak_val - round(self.win_150ms / 2): peak_val + 1]))
                 last_slope = max(
                     np.diff(self.m_win[self.peaks[prev_idx] - round(self.win_150ms / 2): self.peaks[prev_idx] + 1]))
 
-                # If current waveform slope is less than half of last waveform slope, it's a T wave
+                # If current waveform slope is less than half of last waveform slope, it's likely a T-wave
                 if (curr_slope < 0.5 * last_slope):
-                    # T Wave is found and update noise threshold
+                    # Update noise threshold
                     self.T_wave = True
                     self.NPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.NPKI
 
             if (not self.T_wave):
-                # T Wave is not found and update signal thresholds
+                # T-Wave is not found - update signal thresholds
                 if (self.probable_peaks[idx] > self.Threshold_F1):
                     self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
                     self.SPKF = 0.125 * self.b_pass[idx] + 0.875 * self.SPKF
 
-                    # Append the probable R peak location
+                    # Having confirmed it's not a T-wave, append to final peak list
                     self.r_locs.append(self.probable_peaks[idx])
 
                 else:
                     self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
                     self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
-                    # Update noise thresholds
-        elif (self.m_win[peak_val] < self.Threshold_I1) or (
-                self.Threshold_I1 < self.m_win[peak_val] < self.Threshold_I2):
+        # Update noise thresholds
+        elif (self.m_win[peak_val] < self.Threshold_I1) or (self.Threshold_I1 < self.m_win[peak_val] < self.Threshold_I2):
             self.NPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.NPKI
             self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
     def adjust_thresholds(self, peak_val, idx):
-
-        # now we recalculate SPKI and NPKI on a GLOBAL scale
-
         '''
+        Global adjustment of signal and noise y-thresholds
         Adjust Noise and Signal Thresholds During Learning Phase
         :param peak_val: peak location in consideration
         :param idx: current index in peaks array
         '''
 
+        # if (self.m_win[peak_val] >= self.Threshold_I1):
+        #     # JB EDIT - if a mwin peak is above 10x the average, don't count in the threshold update
+        #     # it's counting the T-Waves as well, that's why... fidx a way to move T-Wave up
+        #     if (self.m_win[peak_val] >= 10 * np.mean(self.m_win[:peak_val])):
+        #         pass
+        #     else:
+        #         self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
+
         if (self.m_win[peak_val] >= self.Threshold_I1):
-            # JB EDIT - if a m_win peak is above 10x the average, don't count in the threshold update
-            # it's counting the T-Waves as well, that's why... fidx a way to move T-Wave up
-            if (self.m_win[peak_val] >= 10 * np.mean(self.m_win[:peak_val])):
-                pass
-            else:
-                self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
+            # Update signal threshold
+            self.SPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.SPKI
 
             if (self.probable_peaks[idx] > self.Threshold_F1):
 
@@ -387,17 +385,11 @@ class Heart_Rate():
                 self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
                 # Update noise thresholds
-        elif (self.m_win[peak_val] < self.Threshold_I2) or (
-                self.Threshold_I2 < self.m_win[peak_val] < self.Threshold_I1):
+        elif (self.m_win[peak_val] < self.Threshold_I2) or (self.Threshold_I2 < self.m_win[peak_val] < self.Threshold_I1):
             self.NPKI = 0.125 * self.m_win[peak_val] + 0.875 * self.NPKI
             self.NPKF = 0.125 * self.b_pass[idx] + 0.875 * self.NPKF
 
-        # print(np.mean(self.probable_peaks[idx]))
-
     def update_thresholds(self):
-
-        # apply these new updated thresholds to the whole signal
-
         '''
         Update Noise and Signal Thresholds for next iteration
         '''
@@ -409,22 +401,15 @@ class Heart_Rate():
         self.T_wave = False
 
     def ecg_searchback(self):
-
-        ## this is where we map results back to the original ECG signal
-        # we use the indices of peaks found in m_win and set up a window around it, placed over the original ECG signal to find where the R wave REALLY lies
         '''
-        Searchback in ECG signal to increase efficiency
+        Map found R peaks back to original ECG signal
         '''
 
         # Filter the unique R peak locations
         self.r_locs = np.unique(np.array(self.r_locs).astype(int))
 
-        # Initialize a window to searchback
+        # Initialize a backwards-looking window to searchback (to avoid detecting spurious T-waves)
         win_200ms = round(0.2 * self.fs)
-
-        # TINY CUSTOM CHANGE to code - only have the window look backwards instead of forwards
-        # because the R peak will always lie before the m_avg peak (due to T-wave following) - original code has it either side
-        # but if either side it picks up T-waves that are higher than the nearby R peak as the real peak - false positive
 
         for r_val in self.r_locs:
             coord = np.arange(r_val - win_200ms, min(len(self.signal), r_val + 1), 1)
@@ -438,11 +423,9 @@ class Heart_Rate():
             else:
                 x_max = None
 
-            # Append the peak location
+            # Append the finalised ECG location
             if (x_max is not None):
                 self.result.append(x_max)
-
-                ### x_max are the finalised R peaks
 
     ### custom formula that makes sure no wrong peaks are detected, by checking the rr_interval is not unrealistically low
     # problem is that this wouldn't detect any heart problems....
@@ -465,11 +448,9 @@ class Heart_Rate():
         # Update the result with the final R peaks
         self.result = final_r_peaks
 
-    # Finally run core function - combining all the previous 7 functions
-
     def find_r_peaks(self):
         '''
-        R Peak Detection
+        Runs all methods in HeartRate()
         '''
 
         # find every local maximum in smoothed mwin signal
@@ -497,10 +478,8 @@ class Heart_Rate():
                     self.Threshold_I1 /= 2
                     self.Threshold_F1 /= 2
 
-                # set RRn to most recent RR interval
-                RRn = self.RR1[-1]
-
                 # Searchback to make sure we haven't missed a peak
+                RRn = self.RR1[-1]          # set RRn to most recent RR interval
                 self.searchback(peak_val, RRn, sb_win=round(RRn * self.fs))
 
                 # Confirm the searchback isn't picking up T-waves instead of R peaks
@@ -510,14 +489,14 @@ class Heart_Rate():
                 # Adjust SPKI and NPKI
                 self.adjust_thresholds(peak_val, idx)
 
-            # Update Thresholds
+            # update thresholds for the next iteration (local maximum to be analysed)
             self.update_thresholds()
 
         # Searchback in ECG signal
         self.ecg_searchback()
 
         # Custom formula that removes stupid-low RR-intervals
-        self.final_check()
+        # self.final_check()
 
         return self.result, self.probable_peaks, self.r_locs
 
@@ -615,6 +594,8 @@ def main(ecg,fs):
     # find locations of peaks
     Heart_Rate(signal=mwin, fs=fs).find_r_peaks()
 
+    # plot
+    
 
 
 if __name__ == '__main__':
