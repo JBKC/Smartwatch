@@ -10,6 +10,7 @@ import psycopg2
 from scipy.signal import butter, filtfilt
 import wfdb
 import matplotlib.pyplot as plt
+import peak_detection_qrs
 
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
     """
@@ -191,10 +192,13 @@ def save_wrist_ppg(dir, conn, cur):
         print(y.shape)
         print(z.shape)
 
-        plt.plot(ecg)
-        plt.show()
-        plt.plot(ppg)
-        plt.show()
+        # generate HR labels using peak detection on ECG signal
+        peak_detection_qrs.main(ecg)
+
+        # plt.plot(ecg)
+        # plt.show()
+        # plt.plot(ppg)
+        # plt.show()
 
 
 
