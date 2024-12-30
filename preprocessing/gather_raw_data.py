@@ -139,7 +139,7 @@ def save_ppg_dalia(dir, conn, cur):
             continue
         with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting: {dataset}, {s}')
+            print(f'extracting >> {dataset} / {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -203,7 +203,7 @@ def save_ppg_dalia(dir, conn, cur):
             """, rows)
 
             conn.commit()
-            print(f'saved: {dataset}, {s}')
+            print(f'saved >> {dataset} / {s}')
 
     print(f'extraction completed: {dataset},')
 
@@ -225,7 +225,7 @@ def save_wrist_ppg(dir, conn, cur):
         s, _ = os.path.splitext(s)
 
         record = wfdb.rdrecord(f'{dir}/wrist+ppg/{s}')
-        print(f'extracting: {dataset}, {s}')
+        print(f'extracting >> {dataset} / {s}')
 
         # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer
         # all recorded at 256Hz (downsample to 32Hz)
@@ -292,7 +292,7 @@ def save_wrist_ppg(dir, conn, cur):
         """, rows)
 
         conn.commit()
-        print(f'saved: {dataset}, {s}')
+        print(f'saved >> {dataset} / {s}')
 
     print(f'extraction completed: {dataset},')
 
@@ -312,7 +312,7 @@ def save_wesad(dir, conn, cur):
             continue
         with open(f'{dir}/wesad/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting: {dataset}, {s}')
+            print(f'extracting >> {dataset} / {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -367,7 +367,7 @@ def save_wesad(dir, conn, cur):
             """, rows)
 
             conn.commit()
-            print(f'saved: {dataset}, {s}')
+            print(f'saved >> {dataset} / {s}')
 
     print(f'extraction completed: {dataset},')
 
