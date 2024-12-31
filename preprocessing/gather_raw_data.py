@@ -388,5 +388,8 @@ def main():
 
     print(f'Data extraction complete.')
 
+    cur.close()
+    conn.close()
+
 if __name__ == '__main__':
     main()
