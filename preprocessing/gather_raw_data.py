@@ -1,10 +1,9 @@
 '''
-Training Step 1: Extract raw data, perform intial pre-processing, slice into windows, and upload to PostgreSQL database
+Training Step 1: Extract raw data, perform initial pre-processing, slice into windows, and upload to PostgreSQL database
 '''
 
 import pickle
 import numpy as np
-import pandas as pd
 import os
 import psycopg2
 from scipy.signal import butter, filtfilt, resample
@@ -111,7 +110,7 @@ def window_data(window_dict):
 
     return window_dict, n_windows
 
-def save_ppg_dalia(dir, conn, cur):
+def save_ppg_dalia(dir, table, conn, cur):
     '''
     ## TRAINING DATASET 1 - PPG-Dalia
     '''
@@ -182,11 +181,12 @@ def save_ppg_dalia(dir, conn, cur):
                 for i in range(n_windows)
             ]
 
-            cur.executemany("""
-                INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+            query = f"""
+                INSERT INTO {table} (dataset, session_number, ppg, acc, activity, label)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, rows)
+            """
 
+            cur.executemany(query, rows)
             conn.commit()
             print(f'saved >> {dataset} / {s}')
 
@@ -195,7 +195,7 @@ def save_ppg_dalia(dir, conn, cur):
     return
 
 
-def save_wrist_ppg(dir, conn, cur):
+def save_wrist_ppg(dir, table, conn, cur):
     '''
     ## TRAINING DATASET 2 - Wrist PPG
     '''
@@ -271,11 +271,12 @@ def save_wrist_ppg(dir, conn, cur):
             for i in range(n_windows)
         ]
 
-        cur.executemany("""
-            INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+        query = f"""
+            INSERT INTO {table} (dataset, session_number, ppg, acc, activity, label)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, rows)
+        """
 
+        cur.executemany(query, rows)
         conn.commit()
         print(f'saved >> {dataset} / {s}')
 
@@ -284,7 +285,7 @@ def save_wrist_ppg(dir, conn, cur):
     return
 
 
-def save_wesad(dir, conn, cur):
+def save_wesad(dir, table, conn, cur):
     '''
     ## TRAINING DATASET 3 - PPG-Dalia
     '''
@@ -346,11 +347,12 @@ def save_wesad(dir, conn, cur):
                 for i in range(n_windows)
             ]
 
-            cur.executemany("""
-                INSERT INTO session_data (dataset, session_number, ppg, acc, activity, label)
+            query = f"""
+                INSERT INTO {table} (dataset, session_number, ppg, acc, activity, label)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, rows)
+            """
 
+            cur.executemany(query, rows)
             conn.commit()
             print(f'saved >> {dataset} / {s}')
 
@@ -361,9 +363,13 @@ def save_wesad(dir, conn, cur):
 
 def main():
 
-    # connect to PostgreSQL database
+    # pre-created database & table within PostgreSQL
+    database = "smartwatch_raw_data_all"
+    table = "session_data"
+
+    # connect to database
     conn = psycopg2.connect(
-        dbname="smartwatch_raw_data_all",
+        dbname=database,
         user="postgres",
         password="newpassword",
         host="localhost",
@@ -376,9 +382,9 @@ def main():
     data_dir = root_dir+'/raw_data'
 
     ###
-    save_ppg_dalia(data_dir, conn, cur)
-    save_wrist_ppg(data_dir, conn, cur)
-    save_wesad(data_dir, conn, cur)
+    save_ppg_dalia(data_dir, table, conn, cur)
+    save_wrist_ppg(data_dir, table, conn, cur)
+    save_wesad(data_dir, table, conn, cur)
 
     print(f'Data extraction complete.')
 
