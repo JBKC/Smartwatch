@@ -24,21 +24,6 @@ activity_mapping = {
     8: "running"
 }
 
-def z_normalise(X):
-    '''
-    Z-normalises data for all windows, across each channel, using vectorisation
-    :param X: of shape (n_windows, n_channels, 256)
-    '''
-
-    # calculate mean and stdev for each channel in each window - creates shape (n_windows, 4, 1)
-    ms = X.mean(axis=2, keepdims=True)
-    stds = X.std(axis=2, keepdims=True)
-
-    # Z-normalisation
-    X_norm = (X - ms) / np.where(stds != 0, stds, 1)
-
-    return X_norm, ms.squeeze(axis=2), stds.squeeze(axis=2)
-
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
     """
     Applies Butterworth filter
