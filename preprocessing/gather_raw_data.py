@@ -380,6 +380,7 @@ def main():
     save_wrist_ppg(data_dir, conn, cur)
     save_wesad(data_dir, conn, cur)
 
+    print(f'Data extraction complete.')
 
 if __name__ == '__main__':
     main()
