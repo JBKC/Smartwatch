@@ -28,10 +28,12 @@ def main():
         Counts number of 8-second windows for each activity
         '''
         for act in acts:
+            # query = (f"SELECT COUNT(*) FROM {table} "
+            #          f"WHERE activity = {act} "
+            #          f"AND dataset = 'ppg_dalia' "
+            #          f"AND session_number = 'S7';")
             query = (f"SELECT COUNT(*) FROM {table} "
-                     f"WHERE activity = {act} "
-                     f"AND dataset = 'ppg_dalia' "
-                     f"AND session_number = 'S7';")
+                     f"WHERE activity = {act} ")
             cur.execute(query)
             count = cur.fetchone()[0]
             name = activity_mapping[act]
@@ -41,10 +43,13 @@ def main():
         '''
         Gets average heart rate for each activity
         '''
+        # query = (f"SELECT activity, AVG(label::FLOAT) "
+        #          f"AS average_heart_rate FROM {table} "
+        #          f"WHERE dataset = 'ppg_dalia'"
+        #          f"AND session_number = 'S7'"
+        #          f"GROUP BY activity;")
         query = (f"SELECT activity, AVG(label::FLOAT) "
                  f"AS average_heart_rate FROM {table} "
-                 f"WHERE dataset = 'ppg_dalia'"
-                 f"AND session_number = 'S7'"
                  f"GROUP BY activity;")
         cur.execute(query)
         results = cur.fetchall()
