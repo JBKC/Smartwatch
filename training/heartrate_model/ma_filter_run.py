@@ -77,7 +77,8 @@ def train_ma_filter(cur, conn, table, acts):
     # fetch data by activity
     for act in acts:
         print(f"Training filter for {act}...")
-        for batch in fetch_activity_data(limit=1000)
+        for batch in fetch_activity_data(limit=1000):
+            print(batch)
 
 
 
