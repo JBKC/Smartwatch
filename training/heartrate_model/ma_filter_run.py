@@ -1,6 +1,7 @@
 '''
 Training Step 2: Perform motion artifact removal on raw training data using linear adaptive filter
-Saves down to new table within PostgreSQL database
+Saves filtered data to new table within PostgreSQL database
+Saves individual model parameter sets for each activity
 '''
 
 import pickle
@@ -51,18 +52,61 @@ def undo_normalisation(X_norm, ms, stds):
     return (X_norm * np.where(stds_reshaped != 0, stds_reshaped, 1)) + ms_reshaped
 
 
-def ma_removal(data_dict, sessions):
+def train_ma_filter(cur, conn, table, acts):
     '''
-    Remove session-specific motion artifacts from raw PPG data by training on accelerometer_cnn
-    Save down to dictionary "ppg_filt_dict"
-    :param data_dict: dictionary containing ppg, acc, label and activity data for each session
-    :param s: list of sessions
-    :return: ppg_filt_dict: dictionary containing bvp (cleaned ppg) along with acc, label and activity
+    Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
     '''
 
-    # ppg_dalia_dict filtered for motion artifacts
+    def fetch_activity_data(limit):
+        '''
+        Fetch all data for given activity in batches
+        '''
 
-    ppg_filt_dict = {f'{session}': {} for session in sessions}
+        query = f"""SELECT * FROM {table} WHERE activity = {act} LIMIT {limit} OFFSET %s;"""
+
+        offset = 0
+        while True:
+            # extract data in batches of size limit
+            cur.execute(query, (offset,))
+            rows = cur.fetchall()
+            if not rows:
+                break
+            yield rows
+            offset += limit
+
+    # fetch data by activity
+    for act in acts:
+        print(f"Training filter for {act}...")
+        for batch in fetch_activity_data(limit=1000)
+
+
+
+
+    # sort all SQL data by activity into a dictionary
+    print(f'Fetching data...')
+    cur.execute(f"SELECT activity, ppg, acc FROM {table}")
+    rows = cur.fetchall()
+
+    activity_data = {}
+    for row in rows:
+        activity, ppg, acc = row
+        if activity not in activity_data:
+            activity_data[activity] = {'ppg': [], 'acc': []}
+        activity_data[activity]['ppg'].append(ppg)
+        activity_data[activity]['acc'].append(acc)
+
+    # train filter for each activity
+    for activity, data in activity_data.items():
+        print(f'Training for {activity}')
+
+        # iterate through rows and add to batches
+        # Convert lists to numpy arrays
+        ppg_data = np.array(data['ppg'])  # Shape: (n_windows, 256)
+        acc_data = np.array(data['acc'])  # Shape: (n_windows, 3, 256)
+
+        print(ppg_data.shape)
+        print(acc_data.shape)
+
 
     # initialise CNN model
     n_epochs = 1000
@@ -154,10 +198,15 @@ def ma_removal(data_dict, sessions):
 
 def main():
 
+    def get_activities(cur, table):
+        cur.execute(f"SELECT DISTINCT activity FROM {table}")
+        activities = cur.fetchall()
+        return [activity[0] for activity in activities]
+
     # filter data and add to another SQL table
     database = "smartwatch_raw_data_all"
-    extract_table = "session_data"
-    save_table = "ma_filtered_data"
+    session_table = "session_data"
+    filtered_table = "ma_filtered_data"
 
     # connect to database
     conn = psycopg2.connect(
@@ -169,12 +218,17 @@ def main():
     )
     cur = conn.cursor()
 
-    # pass individual windows through adaptive filter to clean PPG signal
-    column_names = [desc[0] for desc in cur.description]
+    # get unique activities
+    acts = get_activities(cur, session_table)
 
-    # Print column names
-    print("Column Names:", column_names)
+    # train filters & filter data
+    train_ma_filter(cur, conn, session_table, acts)
 
+    # column_names = [desc[0] for desc in cur.description]
+    # print("Column Names:", column_names)
+
+    cur.close()
+    conn.close()
 
 if __name__ == '__main__':
     main()

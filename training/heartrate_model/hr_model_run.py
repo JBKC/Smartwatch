@@ -292,7 +292,7 @@ def main():
 
 
 
-    train_model(dict, sessions)
+    # train_model(dict, sessions)
 
 
 if __name__ == '__main__':
