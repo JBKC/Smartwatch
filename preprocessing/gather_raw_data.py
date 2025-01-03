@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import peak_detection_qrs
 
 activity_mapping = {
+    0: 'none',
     1: "sitting still",
     2: "stairs",
     3: "table football",
@@ -161,7 +162,14 @@ def save_ppg_dalia(dir, table, conn, cur):
                 'activity': activity,
                 'label': label
             }
-            window_dict, n_windows = window_data(window_dict)
+            window_dict, _ = window_data(window_dict)
+
+            # remove transient periods (no activity label)
+            indices = window_dict['activity'] != 0  # boolean mask
+            window_dict['ppg'] = window_dict['ppg'][indices, :]
+            window_dict['acc'] = window_dict['acc'][indices, :, :]
+            window_dict['activity'] = window_dict['activity'][indices]
+            window_dict['label'] = window_dict['label'][indices]
 
             print(window_dict['ppg'].shape)             # (n_samples, 256)
             print(window_dict['acc'].shape)             # (n_samples, 3, 256)
@@ -183,7 +191,7 @@ def save_ppg_dalia(dir, table, conn, cur):
                     int(window_dict['activity'][i]),
                     window_dict['label'][i]
                 )
-                for i in range(n_windows)
+                for i in range(window_dict['label'].shape[0])           # n_windows with transient periods removed
             ]
 
             query = f"""

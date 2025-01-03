@@ -5,15 +5,15 @@ Script for pulling stats of training data
 import psycopg2
 
 activity_mapping = {
-    0: "sitting still",
-    1: "stairs",
-    2: "table football",
-    3: "cycling",
-    4: "driving",
-    5: "lunch break",
-    6: "walking",
-    7: "working at desk",
-    8: "running"
+    1: "sitting still",
+    2: "stairs",
+    3: "table football",
+    4: "cycling",
+    5: "driving",
+    6: "lunch break",
+    7: "walking",
+    8: "working at desk",
+    9: "running"
 }
 
 def main():
