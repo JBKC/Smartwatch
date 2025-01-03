@@ -12,15 +12,15 @@ import matplotlib.pyplot as plt
 import peak_detection_qrs
 
 activity_mapping = {
-    0: "sitting still",
-    1: "stairs",
-    2: "table football",
-    3: "cycling",
-    4: "driving",
-    5: "lunch break",
-    6: "walking",
-    7: "working at desk",
-    8: "running"
+    1: "sitting still",
+    2: "stairs",
+    3: "table football",
+    4: "cycling",
+    5: "driving",
+    6: "lunch break",
+    7: "walking",
+    8: "working at desk",
+    9: "running"
 }
 
 def butter_filter(signal, btype, lowcut=None, highcut=None, fs=32, order=5):
@@ -123,7 +123,7 @@ def save_ppg_dalia(dir, table, conn, cur):
             continue
         with open(f'{dir}/ppg+dalia/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting >> {dataset} / {s}')
+            print(f'extracting >> {dataset} | {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -168,6 +168,11 @@ def save_ppg_dalia(dir, table, conn, cur):
             print(window_dict['activity'].shape)        # (n_samples,)
             print(window_dict['label'].shape)           # (n_samples,)
 
+            # sense check
+            for key, value in activity_mapping.items():
+                count = np.sum(window_dict['activity'] == key)
+                print(value, count)
+
             # Insert into the SQL database
             rows = [
                 (
@@ -188,7 +193,9 @@ def save_ppg_dalia(dir, table, conn, cur):
 
             cur.executemany(query, rows)
             conn.commit()
-            print(f'saved >> {dataset} / {s}')
+
+
+            print(f'saved >> {dataset} | {s}')
 
     print(f'extraction completed: {dataset},')
 
@@ -210,7 +217,7 @@ def save_wrist_ppg(dir, table, conn, cur):
         s, _ = os.path.splitext(s)
 
         record = wfdb.rdrecord(f'{dir}/wrist+ppg/{s}')
-        print(f'extracting >> {dataset} / {s}')
+        print(f'extracting >> {dataset} | {s}')
 
         # .hea file format: 0 = ecg, 1 = ppg, 5-7 = 2g accelerometer
         # all recorded at 256Hz (downsample to 32Hz)
@@ -250,11 +257,11 @@ def save_wrist_ppg(dir, table, conn, cur):
 
         # activity mapping
         if "bike" in s.lower():
-            activity = 3
+            activity = 4
         elif "walk" in s.lower():
-            activity = 6
+            activity = 7
         elif "run" in s.lower():
-            activity = 8
+            activity = 9
 
         print(int(activity))
 
@@ -278,7 +285,7 @@ def save_wrist_ppg(dir, table, conn, cur):
 
         cur.executemany(query, rows)
         conn.commit()
-        print(f'saved >> {dataset} / {s}')
+        print(f'saved >> {dataset} | {s}')
 
     print(f'extraction completed: {dataset},')
 
@@ -298,7 +305,7 @@ def save_wesad(dir, table, conn, cur):
             continue
         with open(f'{dir}/wesad/{s}/{s}.pkl', 'rb') as file:
 
-            print(f'extracting >> {dataset} / {s}')
+            print(f'extracting >> {dataset} | {s}')
 
             data = pickle.load(file, encoding='latin1')
 
@@ -334,6 +341,9 @@ def save_wesad(dir, table, conn, cur):
             print(window_dict['acc'].shape)  # (n_samples, 3, 256)
             print(window_dict['label'].shape)  # (n_samples,)
 
+            # activity mapping (set all to working at desk)
+            activity = int(8)
+
             # Insert into the SQL database
             rows = [
                 (
@@ -341,7 +351,7 @@ def save_wesad(dir, table, conn, cur):
                     s,
                     window_dict['ppg'][i, :].tolist(),
                     window_dict['acc'][i, :, :].tolist(),
-                    int(7),                             # set activity to working at desk
+                    activity,                             # set activity to working at desk
                     window_dict['label'][i]
                 )
                 for i in range(n_windows)
@@ -354,7 +364,7 @@ def save_wesad(dir, table, conn, cur):
 
             cur.executemany(query, rows)
             conn.commit()
-            print(f'saved >> {dataset} / {s}')
+            print(f'saved >> {dataset} | {s}')
 
     print(f'extraction completed: {dataset},')
 
