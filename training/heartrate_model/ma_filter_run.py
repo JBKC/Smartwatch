@@ -16,6 +16,18 @@ import torch.optim as optim
 from scipy.signal import butter, filtfilt
 import psycopg2
 
+activity_mapping = {
+    1: "sitting still",
+    2: "stairs",
+    3: "table football",
+    4: "cycling",
+    5: "driving",
+    6: "lunch break",
+    7: "walking",
+    8: "working at desk",
+    9: "running"
+}
+
 def z_normalise(X):
     '''
     Z-normalises data for all windows, across each channel, using vectorisation
@@ -51,18 +63,17 @@ def undo_normalisation(X_norm, ms, stds):
 
     return (X_norm * np.where(stds_reshaped != 0, stds_reshaped, 1)) + ms_reshaped
 
-
-def train_ma_filter(cur, conn, table, acts):
+def train_ma_filter(cur, conn, table, acts, batch_size):
     '''
     Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
     '''
 
-    def fetch_activity_data(limit):
+    def fetch_activity_data(act, batch_size):
         '''
         Fetch all data for given activity in batches
         '''
 
-        query = f"""SELECT * FROM {table} WHERE activity = {act} LIMIT {limit} OFFSET %s;"""
+        query = f"SELECT * FROM {table} WHERE activity = %s LIMIT %s OFFSET %s;"
 
         offset = 0
         while True:
@@ -72,14 +83,13 @@ def train_ma_filter(cur, conn, table, acts):
             if not rows:
                 break
             yield rows
-            offset += limit
+            offset += batch_size
 
     # fetch data by activity
     for act in acts:
-        print(f"Training filter for {act}...")
-        for batch in fetch_activity_data(limit=1000):
+        print(f"Training filter for {activity_mapping[act]}...")
+        for batch in fetch_activity_data(act, batch_size):
             print(batch)
-
 
 
 
@@ -223,7 +233,8 @@ def main():
     acts = get_activities(cur, session_table)
 
     # train filters & filter data
-    train_ma_filter(cur, conn, session_table, acts)
+    batch_size=256
+    train_ma_filter(cur, conn, session_table, acts, batch_size)
 
     # column_names = [desc[0] for desc in cur.description]
     # print("Column Names:", column_names)

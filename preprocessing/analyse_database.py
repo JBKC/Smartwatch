@@ -19,7 +19,7 @@ activity_mapping = {
 def main():
 
     def get_activities():
-        cur.execute(f"SELECT DISTINCT activity FROM {table}")
+        cur.execute("SELECT DISTINCT activity FROM session_data")
         activities = cur.fetchall()
         return [activity[0] for activity in activities]
 
@@ -28,13 +28,13 @@ def main():
         Counts number of 8-second windows for each activity
         '''
         for act in acts:
-            # query = (f"SELECT COUNT(*) FROM {table} "
+            # query = (f"SELECT COUNT(*) FROM session_data "
             #          f"WHERE activity = {act} "
             #          f"AND dataset = 'ppg_dalia' "
             #          f"AND session_number = 'S7';")
-            query = (f"SELECT COUNT(*) FROM {table} "
-                     f"WHERE activity = {act} ")
-            cur.execute(query)
+            query = ("SELECT COUNT(*) FROM session_data "
+                     "WHERE activity = %s ")
+            cur.execute(query, (act,))
             count = cur.fetchone()[0]
             name = activity_mapping[act]
             print(f"{name} | {count}")
@@ -44,13 +44,13 @@ def main():
         Gets average heart rate for each activity
         '''
         # query = (f"SELECT activity, AVG(label::FLOAT) "
-        #          f"AS average_heart_rate FROM {table} "
+        #          f"AS average_heart_rate FROM session_data "
         #          f"WHERE dataset = 'ppg_dalia'"
         #          f"AND session_number = 'S7'"
         #          f"GROUP BY activity;")
-        query = (f"SELECT activity, AVG(label::FLOAT) "
-                 f"AS average_heart_rate FROM {table} "
-                 f"GROUP BY activity;")
+        query = ("SELECT activity, AVG(label::FLOAT) "
+                 "AS average_heart_rate FROM session_data "
+                 "GROUP BY activity;")
         cur.execute(query)
         results = cur.fetchall()
 
@@ -62,7 +62,6 @@ def main():
 
 
     database = "smartwatch_raw_data_all"
-    table = "session_data"
 
     # connect to database
     conn = psycopg2.connect(
