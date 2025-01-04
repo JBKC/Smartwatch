@@ -124,8 +124,8 @@ def train_ma_filter(cur, conn, acts, batch_size):
                 # PPG data == targets:
                 x_ppg = X[:, :, :1, :]                 # (batch_size, 1, 1, 256)
 
-                print(x_acc.shape)
-                print(x_ppg.shape)
+                # print(x_acc.shape)
+                # print(x_ppg.shape)
 
                 # forward pass through CNN to get x_ma (motion artifact estimate)
                 x_ma = model(x_acc)
@@ -136,7 +136,7 @@ def train_ma_filter(cur, conn, acts, batch_size):
                 loss.backward()
                 optimizer.step()
 
-                print(f'Activity {activity_mapping[act]},'
+                print(f'Activity: {activity_mapping[act]}, '
                       f'Epoch [{epoch + 1}/{n_epochs}], Loss: {loss.item():.4f}')
 
             # subtract the motion artifact estimate from raw signal to extract cleaned BVP
