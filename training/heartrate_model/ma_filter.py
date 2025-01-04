@@ -11,6 +11,8 @@ class AdaptiveLinearModel(nn.Module):
     def __init__(self):
         super().__init__()
 
+        # Conv2D expects (batch_size, in_channels, height, width)
+
         # 1st convolutional layer
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=1,
                                kernel_size=(3, 21), padding='same')
@@ -21,7 +23,7 @@ class AdaptiveLinearModel(nn.Module):
     def forward(self, X):
         '''
         Define forward pass of adaptive filter model
-        :param X: shape (batch_size, n_windows, 3, 256)
+        :param X: shape (batch_size, 1, 3, 256)
         :return: X: shape (batch_size, 256)
         '''
 

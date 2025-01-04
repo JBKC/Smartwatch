@@ -96,7 +96,7 @@ def train_ma_filter(cur, conn, acts, batch_size):
         # initialise activity-specific filter model
         n_epochs = 1000
         model = AdaptiveLinearModel()
-        optimizer = optim.SGD(model.parameters(), lr=1e-7, momentum=1e-2)
+        optimizer = optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999), eps=1e-08)
 
         print(f"Training filter for {activity_mapping[act]}...")
         for batch in fetch_activity_data(act, batch_size):
@@ -151,15 +151,23 @@ def train_ma_filter(cur, conn, acts, batch_size):
 
             # save to new SQL table
             query = """
-                INSERT INTO ma_filtered_data (row['dataset'], row['session_number'], %s
-                 row['acc'], row['activity'], row['label'])
+                INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
+            rows_to_insert = [
+                (
+                    batch[i]['dataset'],
+                    batch[i]['session_number'],
+                    X_BVP[i].tolist(),
+                    batch[i]['acc'],
+                    batch[i]['activity'],
+                    batch[i]['label']
+                )
+                for i in range(len(batch))
+            ]
+            cur.executemany(query, rows_to_insert)
 
-            cur.executemany(query, (X_BVP))
-            conn.commit()
-
-            print(f"Filtered data saved for {activity_mapping[act]}...")
+            print(f"Filtered data saved for {activity_mapping[act]}")
 
     return
 
