@@ -94,43 +94,43 @@ def train_ma_filter(cur, conn, acts, batch_size):
     for act in acts:
 
         # initialise activity-specific filter model
-        n_epochs = 1000
+        n_epochs = 16000
         model = AdaptiveLinearModel()
         optimizer = optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999), eps=1e-08)
+        # add scheduler?
 
         print(f"Training filter for {activity_mapping[act]}...")
-        for batch in fetch_activity_data(act, batch_size):
-            ppg = np.expand_dims(np.array([row['ppg'] for row in batch]), axis=1)
-            acc = np.array([row['acc'] for row in batch])
-            # print(ppg.shape)                # (batch_size, 1, 256)
-            # print(acc.shape)                # (batch_size, 3, 256)
 
-            X_BVP = []  # filtered PPG data
+        # training loop
+        for epoch in range(n_epochs):
+            model.train()
+            # generate batches within each activity
+            for batch in fetch_activity_data(act, batch_size):
+                ppg = np.expand_dims(np.array([row['ppg'] for row in batch]), axis=1)
+                acc = np.array([row['acc'] for row in batch])
+                # print(ppg.shape)                # (batch_size, 1, 256)
+                # print(acc.shape)                # (batch_size, 3, 256)
 
-            # concatenate ppg + accelerometer signal data -> (n_windows, 4, 256)
-            X = np.concatenate((ppg, acc), axis=1)
-            # print(X.shape)                  # (batch_size, 4, 256)
+                X_BVP = []  # filtered PPG data
 
-            # batch Z-normalisation
-            X, ms, stds = z_normalise(X)
+                # concatenate ppg + accelerometer signal data -> (n_windows, 4, 256)
+                X = np.concatenate((ppg, acc), axis=1)
+                # print(X.shape)                  # (batch_size, 4, 256)
+                X, ms, stds = z_normalise(X)                    # batch Z-normalisation
+                X = torch.from_numpy(np.expand_dims(X, axis=1)).float()
 
-            X = np.expand_dims(X, axis=1)          # add channel dimension
-            X = torch.from_numpy(X).float()
+                # accelerometer data == inputs:
+                x_acc = X[:, :, 1:, :]                 # (batch_size, 1, 3, 256)
+                # PPG data == targets:
+                x_ppg = X[:, :, :1, :]                 # (batch_size, 1, 1, 256)
 
-            # accelerometer data == inputs:
-            x_acc = X[:, :, 1:, :]                 # (batch_size, 1, 3, 256)
-            print(x_acc.shape)
-            # PPG data == targets:
-            x_ppg = X[:, :, :1, :]                 # (batch_size, 1, 1, 256)
-            print(x_ppg.shape)
-
-            # training loop
-            for epoch in range(n_epochs):
+                print(x_acc.shape)
+                print(x_ppg.shape)
 
                 # forward pass through CNN to get x_ma (motion artifact estimate)
                 x_ma = model(x_acc)
-                # compute loss against raw PPG data
                 loss = model.adaptive_loss(y_true=x_ppg, y_pred=x_ma)
+
                 # backprop
                 optimizer.zero_grad()
                 loss.backward()
