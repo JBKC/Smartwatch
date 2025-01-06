@@ -7,6 +7,7 @@ Saves individual model parameter sets for each activity
 import pickle
 import numpy as np
 from ma_filter import AdaptiveLinearModel
+from training.wandb_logger import WandBLogger
 import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -63,7 +64,7 @@ def undo_normalisation(X_norm, ms, stds):
 
     return (X_norm * np.where(stds_reshaped != 0, stds_reshaped, 1)) + ms_reshaped
 
-def train_ma_filter(cur, conn, acts, batch_size):
+def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
     '''
     Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
     '''
@@ -94,9 +95,8 @@ def train_ma_filter(cur, conn, acts, batch_size):
     for act in acts:
 
         # initialise activity-specific filter model
-        n_epochs = 16000
         model = AdaptiveLinearModel()
-        optimizer = optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999), eps=1e-08)
+        optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
         # add scheduler?
 
         print(f"Training filter for {activity_mapping[act]}...")
@@ -104,6 +104,8 @@ def train_ma_filter(cur, conn, acts, batch_size):
         # training loop
         for epoch in range(n_epochs):
             model.train()
+            epoch_loss = 0          # loss over all batches per epoch
+
             # generate batches within each activity
             for batch in fetch_activity_data(act, batch_size):
                 ppg = np.expand_dims(np.array([row['ppg'] for row in batch]), axis=1)
@@ -136,42 +138,58 @@ def train_ma_filter(cur, conn, acts, batch_size):
                 loss.backward()
                 optimizer.step()
 
+                epoch_loss += loss.item()
+
                 print(f'Activity: {activity_mapping[act]}, '
-                      f'Epoch [{epoch + 1}/{n_epochs}], Loss: {loss.item():.4f}')
+                      f'Epoch [{epoch + 1}/{n_epochs}], Loss: {epoch_loss:.4f}')
 
-            # subtract the motion artifact estimate from raw signal to extract cleaned BVP
-            with torch.no_grad():
-                x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)
+            # log metrics
+            metrics = {"loss": epoch_loss}
+            metrics.update({f'grad_{name}': param.grad.norm().item()
+                            for name, param in model.named_parameters() if param.grad is not None})
+            logger.log_metrics(metrics, step=epoch)
 
-            # get signal into original shape (n_windows, 1, 256) and de-normalise
-            x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
-            x_bvp = undo_normalisation(x_bvp, ms, stds)
-            x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
-            X_BVP.append(x_bvp)
+        #### training complete ####
+        print(f'Training Complete')
 
-            # save to new SQL table
-            query = """
-                INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            rows_to_insert = [
-                (
-                    batch[i]['dataset'],
-                    batch[i]['session_number'],
-                    X_BVP[i].tolist(),
-                    batch[i]['acc'],
-                    batch[i]['activity'],
-                    batch[i]['label']
-                )
-                for i in range(len(batch))
-            ]
-            cur.executemany(query, rows_to_insert)
+        # subtract the motion artifact estimate from raw signal to extract cleaned BVP
+        with torch.no_grad():
+            x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)
 
-            print(f"Filtered data saved for {activity_mapping[act]}")
+        # get signal into original shape (n_windows, 1, 256) and de-normalise
+        x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
+        x_bvp = undo_normalisation(x_bvp, ms, stds)
+        x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
+        X_BVP.append(x_bvp)
+
+        # save to new SQL table
+        query = """
+            INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        rows_to_insert = [
+            (
+                batch[i]['dataset'],
+                batch[i]['session_number'],
+                X_BVP[i].tolist(),
+                batch[i]['acc'],
+                batch[i]['activity'],
+                batch[i]['label']
+            )
+            for i in range(len(batch))
+        ]
+        cur.executemany(query, rows_to_insert)
+
+        print(f"Filtered data saved for {activity_mapping[act]}")
 
     return
 
 def main():
+
+    # model config
+    lr = 5e-4
+    batch_size = 256
+    n_epochs = 16000
 
     def get_activities(cur):
         cur.execute("SELECT DISTINCT activity FROM session_data")
@@ -189,12 +207,22 @@ def main():
     )
     cur = conn.cursor()
 
+    # initialise model logger
+    logger = WandBLogger(
+        project_name="adaptive-linear-filter",
+        config={
+            "learning_rate": lr,
+            "batch_size": batch_size,
+            "n_epochs": n_epochs,
+            "model_architecture": "AdaptiveLinearModel"
+        }
+    )
+
     # get unique activities
     acts = get_activities(cur)
 
     # train filters & filter data
-    batch_size=256
-    train_ma_filter(cur, conn, acts, batch_size)
+    train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr)
 
     cur.close()
     conn.close()
