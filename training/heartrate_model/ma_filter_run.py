@@ -209,7 +209,7 @@ def main():
 
     # initialise model logger
     logger = WandBLogger(
-        project_name="adaptive-linear-filter",
+        project_name="smartwatch-adaptive-linear-filter",
         config={
             "learning_rate": lr,
             "batch_size": batch_size,
