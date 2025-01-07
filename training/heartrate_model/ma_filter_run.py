@@ -6,7 +6,7 @@ Saves individual model parameter sets for each activity
 
 import numpy as np
 from ma_filter import AdaptiveLinearModel
-from heartrate_model.wandb.wandb_logger import WandBLogger
+from wandb_logger import WandBLogger
 import torch
 import torch.optim as optim
 import psycopg2
