@@ -11,6 +11,7 @@ from wandb_logger import WandBLogger
 import torch
 import torch.optim as optim
 import psycopg2
+import datetime
 
 activity_mapping = {
     1: "sitting still",
@@ -72,7 +73,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
     except ImportError:
         COLAB = False
 
-    # save dictory for models
+    # save directory for models
     if not os.path.exists("saved_models"):
         os.makedirs("saved_models")
 
@@ -163,11 +164,14 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
                 counter = 0
+
                 # save locally
-                model_path = f"saved_models/{activity_mapping[act]}.pth"
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                model_path = f"saved_models/{activity_mapping[act]}_{timestamp}.pth"
                 torch.save(model.state_dict(), model_path)
                 print(f"Model saved locally at {model_path}")
 
+                # save on Drive
                 if COLAB:
                     try:
                         files.download(model_path)
