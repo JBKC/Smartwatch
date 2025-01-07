@@ -178,6 +178,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
 
     return
 
+
 def main():
 
     # model config
