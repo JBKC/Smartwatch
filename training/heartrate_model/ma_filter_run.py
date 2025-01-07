@@ -13,6 +13,7 @@ import torch
 import torch.optim as optim
 import psycopg2
 import datetime
+import copy
 
 activity_mapping = {
     1: "sitting still",
@@ -114,8 +115,10 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
 
         print(f"Training filter for {activity_mapping[act]}...")
 
+        # early stopping parameters
         patience = 100
         best_loss = float('inf')
+        best_model_state = None
         counter = 0
 
         # training loop
@@ -172,31 +175,36 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             # early stopping
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
+                best_model_state = copy.deepcopy(model.state_dict())
                 counter = 0
-
-                # save locally
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                model_path = f"saved_models/{activity_mapping[act]}_{timestamp}.pth"
-                torch.save(model.state_dict(), model_path)
-                print(f"Model saved locally at {model_path}")
-
-                # save on Drive
-                if COLAB:
-                    try:
-                        files.download(model_path)
-                    except Exception as e:
-                        print(f"Failed to download model: {e}")
 
             else:
                 counter += 1
 
-            # Early stopping
+            # early stopping
             if counter >= patience:
                 print(f"Early stopping at epoch {epoch + 1} for {activity_mapping[act]}.")
                 break
 
         #### training complete ####
-        print(f'Training Complete')
+        print(f"Training comlpete for {activity_mapping[act]}...")
+
+        # save best model
+        model.load_state_dict(best_model_state)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        model_path = f"saved_models/{activity_mapping[act]}_{timestamp}.pth"
+        torch.save(model.state_dict(), model_path)
+        print(f"Model saved locally at {model_path}")
+
+        # save on Drive
+        if COLAB:
+            try:
+                files.download(model_path)
+                print(f"Model saved on Drive")
+
+            except Exception as e:
+                print(f"Failed to download model: {e}")
+
 
         # subtract the motion artifact estimate from raw signal to extract cleaned BVP
         with torch.no_grad():
