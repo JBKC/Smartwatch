@@ -150,8 +150,8 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
 
                 epoch_loss += loss.item()
 
-                print(f'Activity: {activity_mapping[act]}, '
-                      f'Epoch [{epoch + 1}/{n_epochs}], Loss: {epoch_loss:.4f}')
+            # print loss at end of each Epoch
+            print(f'Activity: {activity_mapping[act]}, Epoch [{epoch + 1}/{n_epochs}], Loss: {epoch_loss:.4f}')
 
             # log metrics
             metrics = {"loss": epoch_loss}
