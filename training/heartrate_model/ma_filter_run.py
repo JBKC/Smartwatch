@@ -5,6 +5,7 @@ Saves individual model parameter sets for each activity
 '''
 
 import numpy as np
+import os
 from ma_filter import AdaptiveLinearModel
 from wandb_logger import WandBLogger
 import torch
@@ -62,6 +63,18 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
     '''
     Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
     '''
+
+    # check environment (Google Colab or local)
+    try:
+        import google.colab
+        COLAB = True
+        from google.colab import files
+    except ImportError:
+        COLAB = False
+
+    # save dictory for models
+    if not os.path.exists("saved_models"):
+        os.makedirs("saved_models")
 
     def fetch_activity_data(act, batch_size):
         '''
@@ -150,10 +163,17 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
                 counter = 0
-
-                model_path = f"saved_models/{activity_mapping[act]}_best.pth"
+                # save locally
+                model_path = f"saved_models/{activity_mapping[act]}.pth"
                 torch.save(model.state_dict(), model_path)
-                print(f"Best model saved at {model_path}")
+                print(f"Model saved locally at {model_path}")
+
+                if COLAB:
+                    try:
+                        files.download(model_path)
+                    except Exception as e:
+                        print(f"Failed to download model: {e}")
+
             else:
                 counter += 1
 
