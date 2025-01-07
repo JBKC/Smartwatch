@@ -4,17 +4,12 @@ Saves filtered data to new table within PostgreSQL database
 Saves individual model parameter sets for each activity
 '''
 
-import pickle
 import numpy as np
 from ma_filter import AdaptiveLinearModel
 from training.wandb_logger import WandBLogger
-import os
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from scipy.signal import butter, filtfilt
 import psycopg2
 
 activity_mapping = {
