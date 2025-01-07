@@ -91,9 +91,12 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
         # initialise activity-specific filter model
         model = AdaptiveLinearModel()
         optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
-        # add scheduler?
 
         print(f"Training filter for {activity_mapping[act]}...")
+
+        patience = 100
+        best_loss = float('inf')
+        counter = 0
 
         # training loop
         for epoch in range(n_epochs):
@@ -143,14 +146,24 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
                             for name, param in model.named_parameters() if param.grad is not None})
             logger.log_metrics(metrics, step=epoch)
 
+            # early stopping
+            if epoch_loss < best_loss:
+                best_loss = epoch_loss
+                counter = 0
+
+                model_path = f"saved_models/{activity_mapping[act]}_best.pth"
+                torch.save(model.state_dict(), model_path)
+                print(f"Best model saved at {model_path}")
+            else:
+                counter += 1
+
+            # Early stopping
+            if counter >= patience:
+                print(f"Early stopping at epoch {epoch + 1} for {activity_mapping[act]}.")
+                break
+
         #### training complete ####
         print(f'Training Complete')
-
-        #save model
-        model_path = f"saved_models/{activity_mapping[act]}.pth"
-        torch.save(model.state_dict(), model_path)
-        logger.log_artifact(model_path)
-        print(f"Model saved at {model_path}")
 
         # subtract the motion artifact estimate from raw signal to extract cleaned BVP
         with torch.no_grad():
