@@ -6,6 +6,7 @@ Saves individual model parameter sets for each activity
 
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 from ma_filter import AdaptiveLinearModel
 from wandb_logger import WandBLogger
 import torch
@@ -60,9 +61,10 @@ def undo_normalisation(X_norm, ms, stds):
 
     return (X_norm * np.where(stds_reshaped != 0, stds_reshaped, 1)) + ms_reshaped
 
-def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
+def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=None):
     '''
     Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
+    Optionality to train on single selected activity or all
     '''
 
     # check environment (Google Colab or local)
@@ -100,6 +102,10 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
             offset += batch_size
 
     # train by activity
+    if select is not None:
+        if select in acts:
+            acts = [select]
+
     for act in acts:
 
         # initialise activity-specific filter model
@@ -136,6 +142,9 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
                 x_acc = X[:, :, 1:, :]                 # (batch_size, 1, 3, 256)
                 # PPG data == targets:
                 x_ppg = X[:, :, :1, :]                 # (batch_size, 1, 1, 256)
+
+                # plt.plot(x_ppg[0,0,0,:])
+                # plt.show()
 
                 # print(x_acc.shape)
                 # print(x_ppg.shape)
@@ -259,8 +268,17 @@ def main():
     # get unique activities
     acts = get_activities(cur)
 
+    # prompt to select which activity to train
+    select = input("\nEnter activity ID to train (or press Enter to train ALL): ")
+    if select.strip():
+        try:
+            select = int(select)
+        except ValueError:
+            print(f"Invalid input '{select}', not a number. Defaulting to ALL activities.")
+            select = None
+
     # train filters & filter data
-    train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr)
+    train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select)
 
     cur.close()
     conn.close()
