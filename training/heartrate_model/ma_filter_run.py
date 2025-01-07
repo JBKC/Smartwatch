@@ -146,6 +146,12 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
         #### training complete ####
         print(f'Training Complete')
 
+        #save model
+        model_path = f"saved_models/{activity_mapping[act]}.pth"
+        torch.save(model.state_dict(), model_path)
+        logger.log_artifact(model_path)
+        print(f"Model saved at {model_path}")
+
         # subtract the motion artifact estimate from raw signal to extract cleaned BVP
         with torch.no_grad():
             x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)
@@ -156,7 +162,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr):
         x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
         X_BVP.append(x_bvp)
 
-        # save to new SQL table
+        # save filtered signal x_bvp to new SQL table
         query = """
             INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
             VALUES (%s, %s, %s, %s, %s, %s)
