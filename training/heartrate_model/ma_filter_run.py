@@ -116,7 +116,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
         print(f"Training filter for {activity_mapping[act]}...")
 
         # early stopping parameters
-        patience = 100
+        patience = 10
         best_loss = float('inf')
         best_model_state = None
         counter = 0
