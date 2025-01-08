@@ -187,7 +187,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
                 break
 
         #### training complete ####
-        print(f"Training comlpete for {activity_mapping[act]}...")
+        print(f"Training complete for {activity_mapping[act]}...")
 
         # save best model state
         model.load_state_dict(best_model_state)
