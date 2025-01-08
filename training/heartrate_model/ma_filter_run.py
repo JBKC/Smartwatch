@@ -172,7 +172,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
                             for name, param in model.named_parameters() if param.grad is not None})
             logger.log_metrics(metrics, step=epoch)
 
-            # early stopping
+            # create copy of model state for early stopping
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
                 best_model_state = copy.deepcopy(model.state_dict())
@@ -189,7 +189,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
         #### training complete ####
         print(f"Training comlpete for {activity_mapping[act]}...")
 
-        # save best model
+        # save best model state
         model.load_state_dict(best_model_state)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         model_path = f"saved_models/{activity_mapping[act]}_{timestamp}.pth"
