@@ -244,7 +244,7 @@ def main():
     # model config
     lr = 5e-4
     batch_size = 256
-    n_epochs = 16000
+    n_epochs = 1000
 
     def get_activities(cur):
         cur.execute("SELECT DISTINCT activity FROM session_data")
