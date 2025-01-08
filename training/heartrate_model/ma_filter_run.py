@@ -246,6 +246,10 @@ def main():
     batch_size = 256
     n_epochs = 1000
 
+    # local or remote training
+    # host = 'localhost'
+    host = '104.197.247.27'
+
     def get_activities(cur):
         cur.execute("SELECT DISTINCT activity FROM session_data")
         activities = cur.fetchall()
@@ -257,7 +261,7 @@ def main():
         dbname=database,
         user="postgres",
         password="newpassword",
-        host="localhost",
+        host=host,
         port=5432
     )
     cur = conn.cursor()
