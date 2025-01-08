@@ -163,8 +163,8 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
 
                 epoch_loss += loss.item()
 
-            # print loss at end of each Epoch
-            print(f'Activity: {activity_mapping[act]}, Epoch [{epoch + 1}/{n_epochs}], Loss: {epoch_loss:.4f}')
+                # print loss
+                print(f'Activity: {activity_mapping[act]}, Epoch [{epoch + 1}/{n_epochs}], Loss: {epoch_loss:.4f}')
 
             # log metrics
             metrics = {"loss": epoch_loss}
@@ -247,8 +247,8 @@ def main():
     n_epochs = 1000
 
     # local or remote training
-    # host = 'localhost'
-    host = '104.197.247.27'
+    host = 'localhost'
+    # host = '104.197.247.27'
 
     def get_activities(cur):
         cur.execute("SELECT DISTINCT activity FROM session_data")
