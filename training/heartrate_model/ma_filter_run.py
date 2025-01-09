@@ -215,9 +215,8 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             X, ms, stds = z_normalise(X)           # Batch Z-normalization
             X = torch.from_numpy(np.expand_dims(X, axis=1)).float()
 
-            # Separate accelerometer data (inputs)
+            x_ppg = X[:, :, :1, :]  # (batch_size, 1, 1, 256)
             x_acc = X[:, :, 1:, :]  # (batch_size, 1, 3, 256)
-
 
             with torch.no_grad():
                 x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)        # subtract motion artifact from raw signal to extract cleaned BVP
@@ -227,6 +226,8 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             x_bvp = undo_normalisation(x_bvp, ms, stds)
             x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
             print(x_bvp.shape)                                      # (batch_size, 1, 256)
+
+            print(f"Processed batch: {len(batch)}, Filtered signal shape: {x_bvp.shape}")
 
             # Prepare rows for SQL insertions into new table
             rows_to_insert = [
