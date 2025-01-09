@@ -133,8 +133,6 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
                 # print(ppg.shape)                # (batch_size, 1, 256)
                 # print(acc.shape)                # (batch_size, 3, 256)
 
-                X_BVP = []  # filtered PPG data
-
                 # concatenate ppg + accelerometer signal data -> (n_windows, 4, 256)
                 X = np.concatenate((ppg, acc), axis=1)
                 # print(X.shape)                  # (batch_size, 4, 256)
@@ -228,8 +226,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
             x_bvp = undo_normalisation(x_bvp, ms, stds)
             x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
-            X_BVP.append(x_bvp)
-            print(X_BVP.shape)                                      # (n_total_windows, 1, 256)
+            print(x_bvp.shape)                                      # (batch_size, 1, 256)
 
             # Prepare rows for SQL insertions into new table
             rows_to_insert = [
