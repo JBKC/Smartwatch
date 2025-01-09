@@ -205,36 +205,54 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             except Exception as e:
                 print(f"Failed to download model: {e}")
 
+        #### perform filtering on trained model ####
 
-        # subtract the motion artifact estimate from raw signal to extract cleaned BVP
-        with torch.no_grad():
-            x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)
+        # pass signal through trained model to filter by batch
+        for batch in fetch_activity_data(act, batch_size):
+            ppg = np.expand_dims(np.array([row['ppg'] for row in batch]), axis=1)
+            acc = np.array([row['acc'] for row in batch])
 
-        # get signal into original shape (n_windows, 1, 256) and de-normalise
-        x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
-        x_bvp = undo_normalisation(x_bvp, ms, stds)
-        x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
-        X_BVP.append(x_bvp)
+            # Concatenate and normalize
+            X = np.concatenate((ppg, acc), axis=1)  # Shape: (batch_size, 4, 256)
+            X, ms, stds = z_normalise(X)           # Batch Z-normalization
+            X = torch.from_numpy(np.expand_dims(X, axis=1)).float()
 
-        # save filtered signal x_bvp to new SQL table
-        query = """
-            INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        rows_to_insert = [
-            (
-                batch[i]['dataset'],
-                batch[i]['session_number'],
-                X_BVP[i].tolist(),
-                batch[i]['acc'],
-                batch[i]['activity'],
-                batch[i]['label']
-            )
-            for i in range(len(batch))
-        ]
-        cur.executemany(query, rows_to_insert)
+            # Separate accelerometer data (inputs)
+            x_acc = X[:, :, 1:, :]  # (batch_size, 1, 3, 256)
 
-        print(f"Filtered data saved for {activity_mapping[act]}")
+
+            with torch.no_grad():
+                x_bvp = x_ppg[:, 0, 0, :] - model(x_acc)        # subtract motion artifact from raw signal to extract cleaned BVP
+
+            # get signal into original shape (n_windows, 1, 256) and de-normalise
+            x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
+            x_bvp = undo_normalisation(x_bvp, ms, stds)
+            x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
+            X_BVP.append(x_bvp)
+            print(X_BVP.shape)                                      # (n_total_windows, 1, 256)
+
+            # Prepare rows for SQL insertions into new table
+            rows_to_insert = [
+                (
+                    row['dataset'],  # Dataset name
+                    row['session_number'],  # Session number
+                    x_bvp[i].tolist(),  # Filtered PPG signal
+                    row['acc'],  # Raw accelerometer data
+                    row['activity'],  # Activity ID
+                    row['label']  # Ground truth label
+                )
+                for i, row in enumerate(batch)
+            ]
+
+            # Insert filtered data into the new table
+            query = """
+                    INSERT INTO ma_filtered_data (dataset, session_number, ppg, acc, activity, label)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """
+            cur.executemany(query, rows_to_insert)
+            conn.commit()  # Commit changes
+
+        print(f"Filtered data saved for {activity_mapping[act]}.")
 
     return
 
