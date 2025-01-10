@@ -123,7 +123,7 @@ def train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select=None):
 
         # initialise activity-specific filter model
         model = AdaptiveLinearModel()
-        optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=1e-2)
 
         print(f"Training filter for {activity_mapping[act]}...")
 
@@ -269,7 +269,7 @@ def train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select=None):
 def main():
 
     # model config
-    lr = 5e-4
+    lr = 1e-7
     batch_size = 256
     n_epochs = 1000
 

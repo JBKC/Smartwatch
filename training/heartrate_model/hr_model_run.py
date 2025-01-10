@@ -16,34 +16,7 @@ import psutil
 from wandb_logger import WandBLogger
 
 
-def temporal_pairs(dict, sessions):
-    '''
-    Create temporal pairs between adjacent windows for all data
-    :param dict: dictionary of all session data - each session shape (n_windows, n_channels, n_samples)
-    :param sessions: list of session names
-    :return x_all: temporal pairs of each session as a list of length n_sessions - each entry shape (n_windows, 256, 2)
-    :return y_all: ground truth HR labels as a list of length n_sessions
-    :return act_all: activity labels as a list of length n_sessions
-    '''
 
-    x_all = []
-    y_all = []
-    act_all = []
-
-    for s in sessions:
-
-        x = dict[s]['bvp'].squeeze(axis=1)
-
-        # pair adjacent windows (i, i-1)
-        x_pairs = (np.expand_dims(x[1:,:],axis=-1) , np.expand_dims(x[:-1,:],axis=-1))
-        x_pairs = np.concatenate(x_pairs,axis=-1)
-        # results in concatenated pairs of shape (n_windows, n_samples, 2)
-
-        x_all.append(x_pairs)
-        y_all.append(dict[s]['label'][1:])
-        act_all.append(dict[s]['activity'][1:])
-
-    return x_all, y_all, act_all
 
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
     '''
@@ -83,9 +56,22 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         return -dist.log_prob(y)
 
-    def fetch_dataset(batch_size):
-        pass
+    def temporal_pairs(x, labels):
+        '''
+        Create temporal pairs between adjacent windows for a single session
+        :param x: all ppg windows for a single session of shape (n_windows, 256)
+        :param y: all labels for a single session of shape (n_windows,)
+        '''
 
+        # pair adjacent windows in format (i, i-1)
+        x_pairs = (np.expand_dims(x[1:, :], axis=-1), np.expand_dims(x[:-1, :], axis=-1))
+        x_pairs = np.concatenate(x_pairs, axis=-1)
+        y = labels[1:]
+
+        print(x_pairs.shape)                        # concatenated pairs of shape (n_windows, n_samples, 2)
+        print(y.shape)
+
+        return x_pairs, y
 
     # iterate through sessions
     for dataset in datasets:
@@ -98,8 +84,15 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
             query = f"SELECT ppg FROM session_data WHERE session_number = %s;"
             cur.execute(query, (session,))
-            ppg_windows = [row[0] for row in cur.fetchall()]
-            # print(dataset, session, len(ppg_windows))
+            ppg_windows = np.array([row[0] for row in cur.fetchall()])
+
+            query = f"SELECT label FROM session_data WHERE session_number = %s;"
+            cur.execute(query, (session,))
+            labels = np.array([row[0] for row in cur.fetchall()])
+            # print(dataset, session, ppg_windows.shape, labels.shape)
+
+            # create temporal pairs and corresponding labels
+            x, y = temporal_pairs(ppg_windows, labels)
 
 
 
