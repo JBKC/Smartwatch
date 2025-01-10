@@ -1,6 +1,5 @@
 '''
-Main script for training temporal attention model
-*** model trained across all sessions, rather than separate model for each session ***
+Training Step 3: Main supervised attention-based model for extracting heartrate from filtered BVP
 '''
 
 import numpy as np
@@ -14,6 +13,7 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import psutil
+from wandb_logger import WandBLogger
 
 
 def temporal_pairs(dict, sessions):
@@ -266,11 +266,12 @@ def train_model(dict, sessions):
 
 def main():
 
-    # pre-created database & table within PostgreSQL
-    database = "smartwatch_raw_data_all"
-    table = "session_data"
+    lr = 5e-4
+    batch_size = 128
+    n_epochs = 500
 
-    # connect to database
+    # extract filtered BVP signal from SQL database
+    database = "smartwatch_raw_data_all"
     conn = psycopg2.connect(
         dbname=database,
         user="postgres",
@@ -279,6 +280,17 @@ def main():
         port=5432
     )
     cur = conn.cursor()
+
+    # initialise model logger
+    logger = WandBLogger(
+        project_name="smartwatch-hr-predictor",
+        config={
+            "learning_rate": lr,
+            "batch_size": batch_size,
+            "n_epochs": n_epochs,
+            "model_architecture": "AdaptiveLinearModel"
+        }
+    )
 
     # extract data from PostgreSQL database
     cur.execute(f"SELECT * FROM {table} LIMIT 0;")
@@ -292,7 +304,7 @@ def main():
 
 
 
-    # train_model(dict, sessions)
+    train_model(dict, sessions)
 
 
 if __name__ == '__main__':

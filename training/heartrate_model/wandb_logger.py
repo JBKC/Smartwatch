@@ -5,6 +5,7 @@ Generic Weights&Biases logging file
 import wandb
 import torch
 
+
 class WandBLogger:
     def __init__(self, project_name, config):
         """
