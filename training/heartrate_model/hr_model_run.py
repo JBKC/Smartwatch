@@ -112,28 +112,37 @@ def data_generator(cur, groups, test_idx):
 
     yield x_train, y_train, x_val, y_val, x_test, y_test
 
-
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
+
+    def save_checkpoint(state, filename):
+        """ Save a checkpoint to a file """
+        torch.save(state, filename)
+
+    def load_checkpoint(filename):
+        """ Load a checkpoint from a file """
+        if os.path.exists(filename):
+            return torch.load(filename)
+        return None
 
     def torch_convert(X, y, batch_size=10):
         '''
         Necessary when converting large amounts of numpy data to torch data in one go
         '''
 
-        X_batches = []
+        x_batches = []
         y_batches = []
 
         # Process in batches
         for i in range(0, len(X), batch_size):
-            X_batch = X[i:i + batch_size]
+            x_batch = X[i:i + batch_size]
             y_batch = y[i:i + batch_size]
 
             # Convert each batch to PyTorch tensor
-            X_batches.append(torch.tensor(X_batch, dtype=torch.float32))
+            x_batches.append(torch.tensor(x_batch, dtype=torch.float32))
             y_batches.append(torch.tensor(y_batch, dtype=torch.float32))
 
         # Concatenate all batches
-        X_tensor = torch.cat(X_batches, dim=0)
+        X_tensor = torch.cat(x_batches, dim=0)
         y_tensor = torch.cat(y_batches, dim=0)
 
         return X_tensor, y_tensor
@@ -168,9 +177,9 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
         return groups
 
     # initialise model
-    patience = 10               # early stopping parameter
     model = TemporalAttentionModel()
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
+    patience = 10               # early stopping parameter
 
     checkpoint_path = f'/saved_models/hr_model/.pth'
     #### need to edit here to make flexible / decide how to save down model iterations
@@ -225,36 +234,15 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
             start_time = time.time()
 
-            for epoch in range(n_epochs):
-                model.train()
-                for X_batch, y_batch in train_loader:
-                    optimizer.zero_grad()
-                    outputs = model(X_batch)  # Example forward pass
-                    loss = criterion(outputs, y_batch)
-                    loss.backward()
-                    optimizer.step()
-
-
-            # train separate model for each test session
-
-
-            # load checkpoint if available
-
-            # training loop
             for epoch in range(epoch +1, n_epochs):
-
-                print(f'Training started: test session = S{s+1}')
-
                 model.train()
-
-                # create training batches of windows to pass through model
-                for batch_idx, (X_batch, y_batch) in enumerate(train_loader):
-
+                
+                for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
                     optimizer.zero_grad()
 
                     # prep data for model input - shape is (batch_size, n_channels, sequence_length) = (256, 1, 256)
-                    x_cur = X_batch[:, :, 0].unsqueeze(1)
-                    x_prev = X_batch[:, :, -1].unsqueeze(1)
+                    x_cur = x_batch[:, :, 0].unsqueeze(1)
+                    x_prev = x_batch[:, :, -1].unsqueeze(1)
 
                     # forward pass through model (convolutions + attention + probabilistic)
                     dist = model(x_cur, x_prev)
@@ -264,17 +252,18 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     loss.backward()
                     optimizer.step()
 
-                    print(f'Test session: S{s + 1}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
+                    print(f'Fold: {test_idx + 1}/{len(groups)}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
                           f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {loss.item():.4f}')
 
                 # validation on whole validation set after each epoch
                 model.eval()
 
                 with torch.no_grad():
-                    val_dist = model(X_val[:,:,0].unsqueeze(1), X_val[:,:,-1].unsqueeze(1))
+                    val_dist = model(x_val[:,:,0].unsqueeze(1), x_val[:,:,-1].unsqueeze(1))
                     val_loss = NLL(val_dist, y_val).mean()          # average validation across all windows
 
-                    print(f'Test session: S{s + 1}, Epoch [{epoch + 1}/{n_epochs}], Validation Loss: {val_loss.item():.4f}')
+                    print(f'Fold: {test_idx + 1}/{len(groups)}, Epoch [{epoch + 1}/{n_epochs}], '
+                          f'Validation Loss: {val_loss.item():.4f}')
 
                 # early stopping criteria
                 if val_loss < best_val_loss:
@@ -304,9 +293,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
             # test on held-out session after all epochs complete
             with torch.no_grad():
-                test_dist = model(X_test[:,:,0].unsqueeze(1), X_test[:,:,-1].unsqueeze(1))
+                test_dist = model(x_test[:,:,0].unsqueeze(1), x_test[:,:,-1].unsqueeze(1))
                 test_loss = NLL(test_dist, y_test).mean()
-                print(f'Test session: S{s + 1}, Test Loss: {test_loss.item():.4f}')
+
+                print(f'Fold: {test_idx + 1}/{len(groups)}, Test Loss: {test_loss.item():.4f}')
 
         # mark current split as processed
         processed_splits.append(split_idx)
