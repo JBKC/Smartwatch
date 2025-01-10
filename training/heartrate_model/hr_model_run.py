@@ -45,11 +45,9 @@ def temporal_pairs(dict, sessions):
 
     return x_all, y_all, act_all
 
-def train_model(dict, sessions):
+def train_model(cur, conn, batch_size, n_epochs, lr):
     '''
     Create Leave One Session Out split and run through model
-    :param dict: dictionary of all session data - each session shape (n_windows, n_channels, n_samples)
-    :param sessions: list of session names
     '''
 
     def torch_convert(X, y, batch_size=10):
@@ -85,10 +83,15 @@ def train_model(dict, sessions):
 
         return -dist.log_prob(y)
 
+    def fetch_dataset(batch_size):
+        pass
+
+    # create model splits
+
+
+
     # initialise model
-    n_epochs = 500
     patience = 10               # early stopping parameter
-    batch_size = 128            # number of windows to be processed together
     n_splits = 4
 
     print(dict['S1']['bvp'].shape)
@@ -270,41 +273,34 @@ def main():
     batch_size = 128
     n_epochs = 500
 
+    # local or remote training
+    host = 'localhost'
+    # host = '104.197.247.27'
+
     # extract filtered BVP signal from SQL database
     database = "smartwatch_raw_data_all"
     conn = psycopg2.connect(
         dbname=database,
         user="postgres",
         password="newpassword",
-        host="localhost",
+        host=host,
         port=5432
     )
     cur = conn.cursor()
 
-    # initialise model logger
-    logger = WandBLogger(
-        project_name="smartwatch-hr-predictor",
-        config={
-            "learning_rate": lr,
-            "batch_size": batch_size,
-            "n_epochs": n_epochs,
-            "model_architecture": "AdaptiveLinearModel"
-        }
-    )
+    cur.execute("SELECT DISTINCT session_number FROM ma_filtered_data;")
+    sessions = [row[0] for row in cur.fetchall()]  # Extract session values
+    print(sessions)
 
-    # extract data from PostgreSQL database
-    cur.execute(f"SELECT * FROM {table} LIMIT 0;")
+    # Query unique databases
+    cur.execute("SELECT DISTINCT database FROM ma_filtered_data;")
+    databases = [row[0] for row in cur.fetchall()]  # Extract database values
+    print(databases)
 
-    column_names = [desc[0] for desc in cur.description]
+    train_model(cur, conn, batch_size, n_epochs, lr)
 
-    # Print column names
-    print("Column Names:", column_names)
-
-
-
-
-
-    train_model(dict, sessions)
+    cur.close()
+    conn.close()
 
 
 if __name__ == '__main__':
