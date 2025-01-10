@@ -62,7 +62,7 @@ def undo_normalisation(X_norm, ms, stds):
 
     return (X_norm * np.where(stds_reshaped != 0, stds_reshaped, 1)) + ms_reshaped
 
-def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=None):
+def train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select=None):
     '''
     Uses ma_filter architecture to remove motion artifacts from raw PPG signal by activity
     Optionality to train on single selected activity or all
@@ -108,6 +108,18 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             acts = [select]
 
     for act in acts:
+
+        # initialise model logger (separate run for each activity)
+        logger = WandBLogger(
+            project_name="smartwatch-adaptive-linear-filter",
+            config={
+                "activity": activity_mapping[act],
+                "learning_rate": lr,
+                "batch_size": batch_size,
+                "n_epochs": n_epochs,
+                "model_architecture": "AdaptiveLinearModel"
+            }
+        )
 
         # initialise activity-specific filter model
         model = AdaptiveLinearModel()
@@ -184,7 +196,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
                 print(f"Early stopping at epoch {epoch + 1} for {activity_mapping[act]}.")
                 break
 
-        #### training complete ####
+        #### training complete for given activity ####
         print(f"Training complete for {activity_mapping[act]}...")
 
         # save best model state
@@ -203,7 +215,7 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             except Exception as e:
                 print(f"Failed to download model: {e}")
 
-        #### perform filtering on trained model ####
+        #### perform filtering on trained model for given activity ####
 
         # pass signal through trained model to filter by batch
         for batch in fetch_activity_data(act, batch_size):
@@ -281,17 +293,6 @@ def main():
     )
     cur = conn.cursor()
 
-    # initialise model logger
-    logger = WandBLogger(
-        project_name="smartwatch-adaptive-linear-filter",
-        config={
-            "learning_rate": lr,
-            "batch_size": batch_size,
-            "n_epochs": n_epochs,
-            "model_architecture": "AdaptiveLinearModel"
-        }
-    )
-
     # get unique activities
     acts = get_activities(cur)
 
@@ -305,7 +306,7 @@ def main():
             select = None
 
     # train filters & filter data
-    train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select)
+    train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select)
 
     cur.close()
     conn.close()
