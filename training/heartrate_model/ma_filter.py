@@ -1,6 +1,6 @@
 '''
 Adaptive linear filter
-Takes in accelerometer data as input into a CNN, where the adaptive linear filter is the loss function
+Called from ma_filter_run.py
 '''
 
 import numpy as np
