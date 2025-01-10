@@ -13,33 +13,21 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import psutil
 from wandb_logger import WandBLogger
+import datetime
+import copy
 
-
-def temporal_pairs(x, labels):
+def data_generator(cur, folds, test_idx):
     '''
-    Create temporal pairs between adjacent windows for a single session
-    :param x: all ppg windows for a single session of shape (n_windows, 256)
-    :param y: all labels for a single session of shape (n_windows,)
-    '''
-
-    # pair adjacent windows in format (i, i-1)
-    x_pairs = (np.expand_dims(x[1:, :], axis=-1), np.expand_dims(x[:-1, :], axis=-1))
-    x_pairs = np.concatenate(x_pairs, axis=-1)
-    y = labels[1:]
-
-    return x_pairs, y
-
-def data_generator(cur, groups, test_idx):
-    '''
-    Extracts data from SQL table, divides into LOSO train, val and test groups, and creates temporal pairs
-    :param groups: list of sessions divided into groups
+    Extracts data from SQL table, divides into LOSO train, val and test splits, and creates temporal pairs
+    :param folds: list of sessions divided into folds
     :param test_idx: index of the current test session
+    :return: all data and labels for train, val and test splits
     '''
 
     # extract training sessions (!= test session)
-    train_sessions = [(dataset, session) for i, group in enumerate(groups) if i!=test_idx
+    train_sessions = [(dataset, session) for i, group in enumerate(folds) if i!=test_idx
                       for dataset, session in group]
-    test_sessions = groups[test_idx]
+    test_sessions = folds[test_idx]
 
     n_val = int(len(test_sessions) * 4/5)           # number of sessions to retain in validation set
     val_sessions = test_sessions[:n_val]
@@ -112,6 +100,20 @@ def data_generator(cur, groups, test_idx):
 
     yield x_train, y_train, x_val, y_val, x_test, y_test
 
+def temporal_pairs(x, labels):
+    '''
+    Create temporal pairs between adjacent windows for a single session
+    :param x: all ppg windows for a single session of shape (n_windows, 256)
+    :param y: all labels for a single session of shape (n_windows,)
+    '''
+
+    # pair adjacent windows in format (i, i-1)
+    x_pairs = (np.expand_dims(x[1:, :], axis=-1), np.expand_dims(x[:-1, :], axis=-1))
+    x_pairs = np.concatenate(x_pairs, axis=-1)
+    y = labels[1:]
+
+    return x_pairs, y
+
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
     def save_checkpoint(state, filename):
@@ -157,10 +159,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         return -dist.log_prob(y)
 
-    def create_groups(datasets,n_groups):
+    def create_folds(datasets,n_folds):
         '''
         Create grouped LOSO splits for training
-        :return: list of groups
+        :return: list of folds
         '''
 
         all_sessions = []
@@ -172,54 +174,61 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             all_sessions.extend([(dataset, session) for session in sessions])
 
         np.random.shuffle(all_sessions)
-        groups = np.array_split(all_sessions, n_groups)
+        folds = np.array_split(all_sessions, n_folds)
 
-        return groups
+        return folds
 
-    # initialise model
-    model = TemporalAttentionModel()
-    optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
-    patience = 10               # early stopping parameter
 
-    checkpoint_path = f'/saved_models/hr_model/.pth'
-    #### need to edit here to make flexible / decide how to save down model iterations
+    # checkpoint_path = f'saved_models/hr_model/.pth'
+    # checkpoint = torch.load(checkpoint_path)
+    # if checkpoint:
+    #     model.load_state_dict(checkpoint['model_state_dict'])
+    #     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    #     last_split_idx = checkpoint['last_split_idx']
+    #     last_session_idx = checkpoint['last_session_idx']
+    #     processed_splits = checkpoint['processed_splits']
+    #     best_val_loss = checkpoint['best_val_loss']
+    #     print(f"Resuming from split {last_split_idx + 1}, session {last_session_idx + 1}")
+    # else:
+    #     last_split_idx = -1
+    #     last_session_idx = -1
+    #     processed_splits = []
+    #     best_val_loss = float('inf')
+    #     print("Starting training from scratch")
 
-    try:
-        checkpoint = torch.load(checkpoint_path)
+    # predefine the folds for LOSO split
+    folds = create_folds(datasets,n_folds=5)
 
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        epoch = checkpoint['epoch']
-        best_val_loss = checkpoint['best_val_loss']
-        counter = checkpoint['counter']
-        saved_splits = checkpoint['saved_splits'],
-        processed_splits = checkpoint['processed_splits']
-        last_split_idx = checkpoint['last_split_idx']
-        last_session = checkpoint['last_session']
-        last_session_idx = checkpoint['last_session_idx']
-        print(f"Checkpoint found, resuming from Split {last_split_idx + 1}, Session {last_session + 1}")
+    # iterate over folds (each fold trains a new model)
+    for test_idx in range(len(folds)):
 
-    except FileNotFoundError:
-        print("No checkpoint found, training from scratch")
-        best_val_loss = float('inf')  # early stopping parameter
-        counter = 0  # early stopping parameter
-        processed_splits = []  # track each split as they are processed
-        last_split_idx = -1
-        last_session_idx = -1
-        epoch = -1
+        # initialise model
+        model = TemporalAttentionModel()
+        optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
 
-    print(
-        f"System status before training: CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%")
+        print(f"LOSO fold {test_idx + 1} of {len(folds)}")
 
-    # predefine the groups for LOSO split
-    groups = create_groups(datasets,n_groups=5)
+        # early stopping parameters
+        patience = 10
+        best_val_loss = float('inf')
+        best_model_state = None
+        counter = 0
 
-    # dynamically fetch training and test data for single LOSO fold
-    for test_idx in range(len(groups)):
-        print(f"LOSO fold {test_idx + 1} of {len(groups)}")
+        # create separate logs for each fold / model run
+        logger = WandBLogger(
+            project_name="smartwatch-hr-estimator",
+            config={
+                'folds': folds,
+                'fold_idx': test_idx,
+                "learning_rate": lr,
+                "batch_size": batch_size,
+                "n_epochs": n_epochs,
+                "model_architecture": "AdaptiveLinearModel"
+            }
+        )
 
-        # use generator to fetch training & test data for given fold
-        for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, groups, test_idx):
+        # generate all data for given fold
+        for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx):
 
             x_train, y_train = torch_convert(x_train, y_train)
             x_val, y_val = torch_convert(x_val, y_val)
@@ -229,14 +238,17 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             print(f"Validation: {x_val.shape}, {y_val.shape}")
             print(f"Test: {x_test.shape}, {y_test.shape}")
 
+            # batch data
             train_dataset = TensorDataset(x_train, y_train)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
+            # begin training
             start_time = time.time()
 
-            for epoch in range(epoch +1, n_epochs):
+            for epoch in range(n_epochs):
                 model.train()
-                
+                epoch_loss = 0
+
                 for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
                     optimizer.zero_grad()
 
@@ -252,8 +264,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     loss.backward()
                     optimizer.step()
 
-                    print(f'Fold: {test_idx + 1}/{len(groups)}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
-                          f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {loss.item():.4f}')
+                    epoch_loss += loss.item()
+
+                    print(f'Fold: {test_idx + 1}/{len(folds)}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
+                          f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {(epoch_loss / len(train_loader)):.4f}')
 
                 # validation on whole validation set after each epoch
                 model.eval()
@@ -262,48 +276,54 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     val_dist = model(x_val[:,:,0].unsqueeze(1), x_val[:,:,-1].unsqueeze(1))
                     val_loss = NLL(val_dist, y_val).mean()          # average validation across all windows
 
-                    print(f'Fold: {test_idx + 1}/{len(groups)}, Epoch [{epoch + 1}/{n_epochs}], '
+                    print(f'Fold: {test_idx + 1}/{len(folds)}, Epoch [{epoch + 1}/{n_epochs}], '
                           f'Validation Loss: {val_loss.item():.4f}')
 
-                # early stopping criteria
+                # upload metrics to logger for each epoch
+                metrics = {"train loss": epoch_loss, "validation loss": val_loss}
+                metrics.update({f'grad_{name}': param.grad.norm().item()
+                                for name, param in model.named_parameters() if param.grad is not None})
+                logger.log_metrics(metrics, step=epoch)
+
+
+                # early stopping
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
+                    best_model_state = copy.deepcopy(model.state_dict())
                     counter = 0
-
-                    # save down checkpoint of current best model state
-                    checkpoint = {
-                        'model_state_dict': model.state_dict(),  # model weights
-                        'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
-                        'epoch': epoch,  # save the current epoch
-                        'best_val_loss': best_val_loss,  # the best validation loss
-                        'counter': counter,  # early stopping counter
-                        'splits': splits,  # training splits
-                        'processed_splits': processed_splits,  # track which splits have already been processed
-                        'last_split_idx': split_idx,  # the index of the last split
-                        'last_session': s,  # the last session in the current split
-                        'last_session_idx': session_idx,  # the index of the last session in the current split
-                    }
-                    torch.save(checkpoint, checkpoint_path)
 
                 else:
                     counter += 1
-                    if counter >= patience:
-                        print("EARLY STOPPING - onto next split")
-                        break
 
-            # test on held-out session after all epochs complete
+                if counter >= patience:
+                    print("EARLY STOPPING - onto next fold")
+                    break
+
+            # test on test data after all epochs complete for current fold
             with torch.no_grad():
                 test_dist = model(x_test[:,:,0].unsqueeze(1), x_test[:,:,-1].unsqueeze(1))
                 test_loss = NLL(test_dist, y_test).mean()
 
-                print(f'Fold: {test_idx + 1}/{len(groups)}, Test Loss: {test_loss.item():.4f}')
+                print(f'Fold: {test_idx + 1}/{len(folds)}, Test Loss: {test_loss.item():.4f}')
 
-        # mark current split as processed
-        processed_splits.append(split_idx)
-        print(f"Split {split_idx + 1} processed.")
+            end_time = time.time()
+            print(f"TRAINING COMPLETE - Fold: {test_idx + 1}/{len(folds)}, "
+                  f"time: {(end_time - start_time) / 3600:.2f} hours.")
 
-    end_time = time.time()
-    print("TRAINING COMPLETE: time ", (end_time - start_time) / 3600, " hours.")
+            # save down current best model state
+            checkpoint = {
+                'folds': folds,
+                'fold_idx': test_idx,
+                'model_state_dict': best_model_state.state_dict(),  # model weights
+                'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
+                'epoch': epoch,  # save the current epoch
+                'best_val_loss': best_val_loss,  # the best validation loss
+                'counter': counter,  # early stopping counter
+            }
+
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            model_path = f"saved_models/hr_model/hr_model_{timestamp}.pth"
+            torch.save(checkpoint, model_path)
 
     return
 
