@@ -45,7 +45,7 @@ def temporal_pairs(dict, sessions):
 
     return x_all, y_all, act_all
 
-def train_model(cur, conn, batch_size, n_epochs, lr):
+def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
     '''
     Create Leave One Session Out split and run through model
     '''
@@ -86,7 +86,24 @@ def train_model(cur, conn, batch_size, n_epochs, lr):
     def fetch_dataset(batch_size):
         pass
 
-    # create model splits
+
+    # iterate through sessions
+    for dataset in datasets:
+
+        query = f"SELECT DISTINCT session_number FROM ma_filtered_data WHERE dataset=%s;"
+        cur.execute(query, (dataset,))
+        sessions = [row[0] for row in cur.fetchall()]
+
+        for session in sessions:
+
+            query = f"SELECT ppg FROM session_data WHERE session_number = %s;"
+            cur.execute(query, (session,))
+            ppg_windows = [row[0] for row in cur.fetchall()]
+            # print(dataset, session, len(ppg_windows))
+
+
+
+
 
 
 
@@ -96,8 +113,7 @@ def train_model(cur, conn, batch_size, n_epochs, lr):
 
     print(dict['S1']['bvp'].shape)
 
-    # create temporal pairs of time windows
-    x, y, act = temporal_pairs(dict, sessions)
+
 
     # LOSO splits
     ids = shuffle(list(range(len(sessions))))       # index each session
@@ -288,16 +304,12 @@ def main():
     )
     cur = conn.cursor()
 
-    cur.execute("SELECT DISTINCT session_number FROM ma_filtered_data;")
-    sessions = [row[0] for row in cur.fetchall()]  # Extract session values
-    print(sessions)
 
-    # Query unique databases
-    cur.execute("SELECT DISTINCT database FROM ma_filtered_data;")
-    databases = [row[0] for row in cur.fetchall()]  # Extract database values
-    print(databases)
+    # extract unique datasets
+    cur.execute("SELECT DISTINCT dataset FROM ma_filtered_data;")
+    datasets = [row[0] for row in cur.fetchall()]
 
-    train_model(cur, conn, batch_size, n_epochs, lr)
+    train_model(cur, conn, datasets, batch_size, n_epochs, lr)
 
     cur.close()
     conn.close()
