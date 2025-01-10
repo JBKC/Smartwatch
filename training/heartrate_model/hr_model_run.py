@@ -3,7 +3,6 @@ Training Step 3: Main supervised attention-based model for extracting heartrate 
 '''
 
 import numpy as np
-import pickle
 from sklearn.utils import shuffle
 import time
 import psycopg2
@@ -16,12 +15,83 @@ import psutil
 from wandb_logger import WandBLogger
 
 
+def temporal_pairs(x, labels):
+    '''
+    Create temporal pairs between adjacent windows for a single session
+    :param x: all ppg windows for a single session of shape (n_windows, 256)
+    :param y: all labels for a single session of shape (n_windows,)
+    '''
+
+    # pair adjacent windows in format (i, i-1)
+    x_pairs = (np.expand_dims(x[1:, :], axis=-1), np.expand_dims(x[:-1, :], axis=-1))
+    x_pairs = np.concatenate(x_pairs, axis=-1)
+    y = labels[1:]
+
+    return x_pairs, y
+
+def data_generator(cur, groups, test_idx):
+    '''
+    Extracts data from SQL table, divides into LOSO groups and creates temporal pairs
+    :param groups: list of sessions divided into groups
+    :param test_idx: index of the current test session
+    '''
+
+    # extract training sessions (!= test session)
+    train_sessions = [(dataset, session) for i, group in enumerate(groups) if i!=test_idx
+                      for dataset, session in group]
+    test_sessions = groups[test_idx]
+
+    print(len(train_sessions))
+    print(len(test_sessions))
+
+    # get temporal pairings for training data
+    x_train, y_train = [],[]
+    x_test, y_test = [],[]
+
+    # extract temporal pairs for training data
+    for dataset, session in train_sessions:
+
+        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        ppg_windows = np.array([row[0] for row in cur.fetchall()])
+
+        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        labels = np.array([row[0] for row in cur.fetchall()])
+
+        print(dataset, session, ppg_windows.shape, labels.shape)
+        x_pairs, y = temporal_pairs(ppg_windows, labels)
+        # print(x_pairs.shape)  # concatenated pairs of shape (n_windows, n_samples, 2)
+        # print(y.shape)
+
+        x_train.append(x_pairs)
+        y_train.append(y)
+
+    # extract temporal pairs for test data
+    for dataset, session in test_sessions:
+
+        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        ppg_windows = np.array([row[0] for row in cur.fetchall()])
+
+        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        labels = np.array([row[0] for row in cur.fetchall()])
+
+        x_pairs, y = temporal_pairs(ppg_windows, labels)
+
+        x_test.append(x_pairs)
+        y_test.append(y)
+
+    x_train = np.concatenate(x_train, axis=0)
+    y_train = np.concatenate(y_train, axis=0)
+    x_test = np.concatenate(x_test, axis=0)
+    y_test = np.concatenate(y_test, axis=0)
+
+    yield x_train, y_train, x_test, y_test
 
 
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
-    '''
-    Create Leave One Session Out split and run through model
-    '''
 
     def torch_convert(X, y, batch_size=10):
         '''
@@ -56,55 +126,47 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         return -dist.log_prob(y)
 
-    def temporal_pairs(x, labels):
+    def create_groups(datasets,n_groups):
         '''
-        Create temporal pairs between adjacent windows for a single session
-        :param x: all ppg windows for a single session of shape (n_windows, 256)
-        :param y: all labels for a single session of shape (n_windows,)
+        Create grouped LOSO splits for training
+        :return: list of groups
         '''
 
-        # pair adjacent windows in format (i, i-1)
-        x_pairs = (np.expand_dims(x[1:, :], axis=-1), np.expand_dims(x[:-1, :], axis=-1))
-        x_pairs = np.concatenate(x_pairs, axis=-1)
-        y = labels[1:]
+        all_sessions = []
 
-        print(x_pairs.shape)                        # concatenated pairs of shape (n_windows, n_samples, 2)
-        print(y.shape)
+        for dataset in datasets:
+            query = f"SELECT DISTINCT session_number FROM ma_filtered_data WHERE dataset=%s;"
+            cur.execute(query, (dataset,))
+            sessions = [row[0] for row in cur.fetchall()]
+            all_sessions.extend([(dataset, session) for session in sessions])
 
-        return x_pairs, y
+        np.random.shuffle(all_sessions)
+        groups = np.array_split(all_sessions, n_groups)
 
-    # iterate through sessions
-    for dataset in datasets:
+        return groups
 
-        query = f"SELECT DISTINCT session_number FROM ma_filtered_data WHERE dataset=%s;"
-        cur.execute(query, (dataset,))
-        sessions = [row[0] for row in cur.fetchall()]
+    # predefine the groups for LOSO split
+    groups = create_groups(datasets,n_groups=5)
 
-        for session in sessions:
+    # dynamically fetch training and test data
+    for test_idx in range(len(groups)):
+        print(f"LOSO Fold {test_idx + 1} of {len(groups)}")
 
-            query = f"SELECT ppg FROM session_data WHERE session_number = %s;"
-            cur.execute(query, (session,))
-            ppg_windows = np.array([row[0] for row in cur.fetchall()])
+        # use generator to fetch training & test data for given fold
+        for x_train, y_train, x_test, y_test in data_generator(cur, groups, test_idx):
+            print(f"Train: {x_train.shape}, {y_train.shape}")
+            print(f"Test: {x_test.shape}, {y_test.shape}")
 
-            query = f"SELECT label FROM session_data WHERE session_number = %s;"
-            cur.execute(query, (session,))
-            labels = np.array([row[0] for row in cur.fetchall()])
-            # print(dataset, session, ppg_windows.shape, labels.shape)
-
-            # create temporal pairs and corresponding labels
-            x, y = temporal_pairs(ppg_windows, labels)
-
-
-
-
-
+            x_train, y_train = torch_convert(x_train, y_train)
+            x_test, y_test = torch_convert(x_test, y_test)
+            
+            print(f"Train: {x_train.shape}, {y_train.shape}")
+            print(f"Test: {x_test.shape}, {y_test.shape}")
 
 
     # initialise model
     patience = 10               # early stopping parameter
     n_splits = 4
-
-    print(dict['S1']['bvp'].shape)
 
 
 
