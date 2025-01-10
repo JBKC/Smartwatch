@@ -31,7 +31,7 @@ def temporal_pairs(x, labels):
 
 def data_generator(cur, groups, test_idx):
     '''
-    Extracts data from SQL table, divides into LOSO groups and creates temporal pairs
+    Extracts data from SQL table, divides into LOSO train, val and test groups, and creates temporal pairs
     :param groups: list of sessions divided into groups
     :param test_idx: index of the current test session
     '''
@@ -41,8 +41,11 @@ def data_generator(cur, groups, test_idx):
                       for dataset, session in group]
     test_sessions = groups[test_idx]
 
-    print(len(train_sessions))
-    print(len(test_sessions))
+    n_val = int(len(test_sessions) * 4/5)           # number of sessions to retain in validation set
+    val_sessions = test_sessions[:n_val]
+    test_sessions = test_sessions[n_val:]
+
+    print(len(train_sessions), len(val_sessions), len(test_sessions))
 
     # get temporal pairings for training data
     x_train, y_train = [],[]
@@ -145,6 +148,8 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         return groups
 
+    # initialise model
+
     # predefine the groups for LOSO split
     groups = create_groups(datasets,n_groups=5)
 
@@ -154,14 +159,24 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         # use generator to fetch training & test data for given fold
         for x_train, y_train, x_test, y_test in data_generator(cur, groups, test_idx):
-            print(f"Train: {x_train.shape}, {y_train.shape}")
-            print(f"Test: {x_test.shape}, {y_test.shape}")
 
             x_train, y_train = torch_convert(x_train, y_train)
             x_test, y_test = torch_convert(x_test, y_test)
-            
+
             print(f"Train: {x_train.shape}, {y_train.shape}")
             print(f"Test: {x_test.shape}, {y_test.shape}")
+
+            train_dataset = TensorDataset(x_train, y_train)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+            for epoch in range(n_epochs):
+                model.train()
+                for X_batch, y_batch in train_loader:
+                    optimizer.zero_grad()
+                    outputs = model(X_batch)  # Example forward pass
+                    loss = criterion(outputs, y_batch)
+                    loss.backward()
+                    optimizer.step()
 
 
     # initialise model
