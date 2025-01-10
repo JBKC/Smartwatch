@@ -225,7 +225,6 @@ def train_ma_filter(cur, conn, acts, logger, batch_size, n_epochs, lr, select=No
             x_bvp = torch.unsqueeze(x_bvp, dim=1).numpy()
             x_bvp = undo_normalisation(x_bvp, ms, stds)
             x_bvp = np.expand_dims(x_bvp[:,0,:], axis=1)            # keep only BVP (remove ACC)
-            print(x_bvp.shape)                                      # (batch_size, 1, 256)
 
             print(f"Processed batch: {len(batch)}, Filtered signal shape: {x_bvp.shape}")
 
