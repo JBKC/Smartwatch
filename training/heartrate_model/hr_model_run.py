@@ -210,6 +210,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
         # early stopping parameters
         patience = 10
+        best_train_loss = float('inf')
         best_val_loss = float('inf')
         best_model_state = None
         counter = 0
@@ -267,7 +268,11 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     epoch_loss += loss.item()
 
                     print(f'Fold: {test_idx + 1}/{len(folds)}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
-                          f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {(epoch_loss / len(train_loader)):.4f}')
+                          f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {loss:.4f}')
+
+                epoch_loss /= len(train_loader)
+                if epoch_loss < best_train_loss:
+                    best_train_loss = epoch_loss
 
                 # validation on whole validation set after each epoch
                 model.eval()
@@ -314,9 +319,9 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             checkpoint = {
                 'folds': folds,
                 'fold_idx': test_idx,
-                'model_state_dict': best_model_state.state_dict(),  # model weights
+                'model_state_dict': best_model_state,  # model weights
                 'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
-                'epoch': epoch,  # save the current epoch
+                'best_train_loss': best_train_loss,
                 'best_val_loss': best_val_loss,  # the best validation loss
                 'counter': counter,  # early stopping counter
             }
