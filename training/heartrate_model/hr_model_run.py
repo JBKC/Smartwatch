@@ -7,7 +7,7 @@ from sklearn.utils import shuffle
 import time
 import psycopg2
 import os
-# from temporal_attention_model import TemporalAttentionModel
+from hr_model import TemporalAttentionModel
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
@@ -48,8 +48,9 @@ def data_generator(cur, groups, test_idx):
     print(len(train_sessions), len(val_sessions), len(test_sessions))
 
     # get temporal pairings for training data
-    x_train, y_train = [],[]
-    x_test, y_test = [],[]
+    x_train, y_train = [], []
+    x_val, y_val = [], []
+    x_test, y_test = [], []
 
     # extract temporal pairs for training data
     for dataset, session in train_sessions:
@@ -70,6 +71,22 @@ def data_generator(cur, groups, test_idx):
         x_train.append(x_pairs)
         y_train.append(y)
 
+    # extract temporal pairs for validation data
+    for dataset, session in val_sessions:
+
+        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        ppg_windows = np.array([row[0] for row in cur.fetchall()])
+
+        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
+        cur.execute(query, (dataset,session))
+        labels = np.array([row[0] for row in cur.fetchall()])
+
+        x_pairs, y = temporal_pairs(ppg_windows, labels)
+
+        x_val.append(x_pairs)
+        y_val.append(y)
+
     # extract temporal pairs for test data
     for dataset, session in test_sessions:
 
@@ -88,10 +105,12 @@ def data_generator(cur, groups, test_idx):
 
     x_train = np.concatenate(x_train, axis=0)
     y_train = np.concatenate(y_train, axis=0)
+    x_val = np.concatenate(x_val, axis=0)
+    y_val = np.concatenate(y_val, axis=0)
     x_test = np.concatenate(x_test, axis=0)
     y_test = np.concatenate(y_test, axis=0)
 
-    yield x_train, y_train, x_test, y_test
+    yield x_train, y_train, x_val, y_val, x_test, y_test
 
 
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
@@ -149,25 +168,62 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
         return groups
 
     # initialise model
+    patience = 10               # early stopping parameter
+    model = TemporalAttentionModel()
+    optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
+
+    checkpoint_path = f'/saved_models/hr_model/.pth'
+    #### need to edit here to make flexible / decide how to save down model iterations
+
+    try:
+        checkpoint = torch.load(checkpoint_path)
+
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        epoch = checkpoint['epoch']
+        best_val_loss = checkpoint['best_val_loss']
+        counter = checkpoint['counter']
+        saved_splits = checkpoint['saved_splits'],
+        processed_splits = checkpoint['processed_splits']
+        last_split_idx = checkpoint['last_split_idx']
+        last_session = checkpoint['last_session']
+        last_session_idx = checkpoint['last_session_idx']
+        print(f"Checkpoint found, resuming from Split {last_split_idx + 1}, Session {last_session + 1}")
+
+    except FileNotFoundError:
+        print("No checkpoint found, training from scratch")
+        best_val_loss = float('inf')  # early stopping parameter
+        counter = 0  # early stopping parameter
+        processed_splits = []  # track each split as they are processed
+        last_split_idx = -1
+        last_session_idx = -1
+        epoch = -1
+
+    print(
+        f"System status before training: CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%")
 
     # predefine the groups for LOSO split
     groups = create_groups(datasets,n_groups=5)
 
-    # dynamically fetch training and test data
+    # dynamically fetch training and test data for single LOSO fold
     for test_idx in range(len(groups)):
-        print(f"LOSO Fold {test_idx + 1} of {len(groups)}")
+        print(f"LOSO fold {test_idx + 1} of {len(groups)}")
 
         # use generator to fetch training & test data for given fold
-        for x_train, y_train, x_test, y_test in data_generator(cur, groups, test_idx):
+        for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, groups, test_idx):
 
             x_train, y_train = torch_convert(x_train, y_train)
+            x_val, y_val = torch_convert(x_val, y_val)
             x_test, y_test = torch_convert(x_test, y_test)
 
             print(f"Train: {x_train.shape}, {y_train.shape}")
+            print(f"Validation: {x_val.shape}, {y_val.shape}")
             print(f"Test: {x_test.shape}, {y_test.shape}")
 
             train_dataset = TensorDataset(x_train, y_train)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+            start_time = time.time()
 
             for epoch in range(n_epochs):
                 model.train()
@@ -179,101 +235,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     optimizer.step()
 
 
-    # initialise model
-    patience = 10               # early stopping parameter
-    n_splits = 4
-
-
-
-    # LOSO splits
-    ids = shuffle(list(range(len(sessions))))       # index each session
-    splits = np.array_split(ids, n_splits)
-
-    start_time = time.time()
-
-    # outer LOSO split for training data
-    for split_idx, split in enumerate(splits):
-
-        # # skip already-processed splits
-        # if split_idx <= last_split_idx:
-        #     continue
-
-        # set training data (current split = testing/validation data)
-        train_idxs = np.array([i for i in ids if i not in split])
-
-        X_train = np.concatenate([x[i] for i in train_idxs], axis=0)
-        y_train = np.concatenate([y[i] for i in train_idxs], axis=0)
-
-        # compress representation
-        X_train = X_train.astype(np.float32)
-        y_train = y_train.astype(np.float32)
-
-        # Convert the dataset
-        X_train, y_train = torch_convert(X_train, y_train)
-
-        # create TensorDataset and DataLoader for batching
-        train_dataset = TensorDataset(X_train, y_train)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-
-        # inner LOSO split for testing & validation data
-        for session_idx, s in enumerate(split):
-
-            # # skip already-processed sessions in current split
-            # if split_idx == last_split_idx and session_idx <= last_session_idx:
-            #     continue
-
-            # set test data as the current session s within the current split
-            X_test = x[s]
-            y_test = y[s]
-            X_test = X_test.astype(np.float32)
-            y_test = y_test.astype(np.float32)
-            X_test, y_test = torch_convert(X_test, y_test)
-
-            # set validation data (remainder of current split)
-            val_idxs = np.array([j for j in split if j != s])
-            X_val = np.concatenate([x[j] for j in val_idxs], axis=0)
-            y_val = np.concatenate([y[j] for j in val_idxs], axis=0)
-            X_val = X_val.astype(np.float32)
-            y_val = y_val.astype(np.float32)
-            X_val, y_val = torch_convert(X_val, y_val)
-
-            print(f"X_train shape: {X_train.shape}")
-            print(f"X_val shape: {X_val.shape}")
-            print(f"X_test shape: {X_test.shape}")
-
             # train separate model for each test session
-            model = TemporalAttentionModel()
-            optimizer = optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999), eps=1e-08)
+
 
             # load checkpoint if available
-            checkpoint_path = f'../models/temporal_attention_model_session_S{s+1}.pth'
-
-            try:
-                checkpoint = torch.load(checkpoint_path)
-
-                model.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                epoch = checkpoint['epoch']
-                best_val_loss = checkpoint['best_val_loss']
-                counter = checkpoint['counter']
-                saved_splits = checkpoint['saved_splits'],
-                processed_splits = checkpoint['processed_splits']
-                last_split_idx = checkpoint['last_split_idx']
-                last_session = checkpoint['last_session']
-                last_session_idx = checkpoint['last_session_idx']
-                print(f"Checkpoint found, resuming from Split {last_split_idx + 1}, Session {last_session + 1}")
-
-            except FileNotFoundError:
-                print("No checkpoint found, training from scratch")
-                best_val_loss = float('inf')  # early stopping parameter
-                counter = 0  # early stopping parameter
-                processed_splits = []  # track each split as they are processed
-                last_split_idx = -1
-                last_session_idx = -1
-                epoch = -1
-
-            print(
-                f"System status before training: CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%")
 
             # training loop
             for epoch in range(epoch +1, n_epochs):

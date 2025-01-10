@@ -77,8 +77,8 @@ def train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select=None):
         COLAB = False
 
     # save directory for models
-    if not os.path.exists("saved_models"):
-        os.makedirs("saved_models")
+    if not os.path.exists("saved_models/ma_filter/"):
+        os.makedirs("saved_models/ma_filter/")
 
     def fetch_activity_data(act, batch_size):
         '''
@@ -202,7 +202,7 @@ def train_ma_filter(cur, conn, acts, batch_size, n_epochs, lr, select=None):
         # save best model state
         model.load_state_dict(best_model_state)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        model_path = f"saved_models/{activity_mapping[act]}_{timestamp}.pth"
+        model_path = f"saved_models/ma_filter/{activity_mapping[act]}_{timestamp}.pth"
         torch.save(model.state_dict(), model_path)
         print(f"Model saved locally at {model_path}")
 
