@@ -16,7 +16,7 @@ from wandb_logger import WandBLogger
 import datetime
 import copy
 
-def data_generator(cur, folds, test_idx):
+def data_generator(cur, folds, test_idx, batch_size):
     '''
     Extracts data from SQL table, divides into LOSO train, val and test splits, and creates temporal pairs
     :param folds: list of sessions divided into folds
@@ -33,72 +33,51 @@ def data_generator(cur, folds, test_idx):
     val_sessions = test_sessions[:n_val]
     test_sessions = test_sessions[n_val:]
 
-    print(len(train_sessions), len(val_sessions), len(test_sessions))
+    # print(len(train_sessions), len(val_sessions), len(test_sessions))
 
-    # get temporal pairings for training data
-    x_train, y_train = [], []
-    x_val, y_val = [], []
-    x_test, y_test = [], []
+    def fetch_batch(sessions, offset, batch_size):
+        '''
+        Fetch data one batch at a time
+        '''
+        x_batch, y_batch = [], []
 
-    # extract temporal pairs for training data
-    for dataset, session in train_sessions:
+        for dataset, session in sessions:
+            query_ppg = f"""
+                SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s 
+                LIMIT %s OFFSET %s;
+            """
+            cur.execute(query_ppg, (dataset, session, batch_size, offset))
+            ppg_windows = np.array([row[0] for row in cur.fetchall()])
 
-        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        ppg_windows = np.array([row[0] for row in cur.fetchall()])
+            query_label = f"""
+                SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s 
+                LIMIT %s OFFSET %s;
+            """
+            cur.execute(query_label, (dataset, session, batch_size, offset))
+            labels = np.array([row[0] for row in cur.fetchall()])
 
-        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        labels = np.array([row[0] for row in cur.fetchall()])
+            if ppg_windows.size == 0 or labels.size == 0:
+                continue  # No more data for this session
 
-        print(dataset, session, ppg_windows.shape, labels.shape)
-        x_pairs, y = temporal_pairs(ppg_windows, labels)
-        # print(x_pairs.shape)  # concatenated pairs of shape (n_windows, n_samples, 2)
-        # print(y.shape)
+            x_pairs, y = temporal_pairs(ppg_windows, labels)
+            x_batch.append(x_pairs)
+            y_batch.append(y)
 
-        x_train.append(x_pairs)
-        y_train.append(y)
+        if not x_batch:
+            raise StopIteration  # All data for this split is processed
 
-    # extract temporal pairs for validation data
-    for dataset, session in val_sessions:
+        return np.concatenate(x_batch, axis=0), np.concatenate(y_batch, axis=0)
 
-        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        ppg_windows = np.array([row[0] for row in cur.fetchall()])
-
-        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        labels = np.array([row[0] for row in cur.fetchall()])
-
-        x_pairs, y = temporal_pairs(ppg_windows, labels)
-
-        x_val.append(x_pairs)
-        y_val.append(y)
-
-    # extract temporal pairs for test data
-    for dataset, session in test_sessions:
-
-        query = f"SELECT ppg FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        ppg_windows = np.array([row[0] for row in cur.fetchall()])
-
-        query = f"SELECT label FROM ma_filtered_data WHERE dataset=%s AND session_number=%s;"
-        cur.execute(query, (dataset,session))
-        labels = np.array([row[0] for row in cur.fetchall()])
-
-        x_pairs, y = temporal_pairs(ppg_windows, labels)
-
-        x_test.append(x_pairs)
-        y_test.append(y)
-
-    x_train = np.concatenate(x_train, axis=0)
-    y_train = np.concatenate(y_train, axis=0)
-    x_val = np.concatenate(x_val, axis=0)
-    y_val = np.concatenate(y_val, axis=0)
-    x_test = np.concatenate(x_test, axis=0)
-    y_test = np.concatenate(y_test, axis=0)
-
-    yield x_train, y_train, x_val, y_val, x_test, y_test
+    offset = 0
+    while True:
+        try:
+            x_train, y_train = fetch_batch(train_sessions, offset, batch_size)
+            x_val, y_val = fetch_batch(val_sessions, offset, batch_size)
+            x_test, y_test = fetch_batch(test_sessions, offset, batch_size)
+            yield x_train, y_train, x_val, y_val, x_test, y_test
+            offset += batch_size
+        except StopIteration:
+            break
 
 def temporal_pairs(x, labels):
     '''
@@ -119,7 +98,6 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
     def save_checkpoint(state, filename):
         """ Save a checkpoint to a file """
         torch.save(state, filename)
-
     def load_checkpoint(filename):
         """ Load a checkpoint from a file """
         if os.path.exists(filename):
@@ -228,12 +206,13 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             }
         )
 
-        # generate all data for given fold
-        for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx):
+        ### extract & pass batches through model one by one
+        # generate data for single batch in given fold
+        for x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx, batch_size):
 
-            x_train, y_train = torch_convert(x_train, y_train)
-            x_val, y_val = torch_convert(x_val, y_val)
-            x_test, y_test = torch_convert(x_test, y_test)
+            x_train, y_train = torch.tensor(x_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32)
+            x_val, y_val = torch.tensor(x_val, dtype=torch.float32), torch.tensor(y_val, dtype=torch.float32)
+            x_test, y_test = torch.tensor(x_test, dtype=torch.float32), torch.tensor(y_test, dtype=torch.float32)
 
             print(f"Train: {x_train.shape}, {y_train.shape}")
             print(f"Validation: {x_val.shape}, {y_val.shape}")
@@ -264,7 +243,6 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     loss = NLL(dist, y_batch).mean()
                     loss.backward()
                     optimizer.step()
-
                     epoch_loss += loss.item()
 
                     print(f'Fold: {test_idx + 1}/{len(folds)}, Batch: [{batch_idx + 1}/{len(train_loader)}], '
