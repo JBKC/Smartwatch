@@ -3,7 +3,6 @@ Training Step 3: Main supervised attention-based model for extracting heartrate 
 '''
 
 import numpy as np
-from sklearn.utils import shuffle
 import time
 import psycopg2
 import os
@@ -11,29 +10,19 @@ from hr_model import TemporalAttentionModel
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import psutil
 from wandb_logger import WandBLogger
 import datetime
 import copy
 
+
+
 def data_generator(cur, folds, test_idx, batch_size):
     '''
-    Extracts data from SQL table, divides into LOSO train, val and test splits, and creates temporal pairs
+    Divides whole dataset by session_number into LOSO groups, and extracts batches in turn to create temporal pairs
     :param folds: list of sessions divided into folds
     :param test_idx: index of the current test session
-    :return: all data and labels for train, val and test splits
+    :return: data and labels for train, val and test splits for given batch
     '''
-
-    # extract training sessions (!= test session)
-    train_sessions = [(dataset, session) for i, group in enumerate(folds) if i!=test_idx
-                      for dataset, session in group]
-    test_sessions = folds[test_idx]
-
-    n_val = int(len(test_sessions) * 4/5)           # number of sessions to retain in validation set
-    val_sessions = test_sessions[:n_val]
-    test_sessions = test_sessions[n_val:]
-
-    # print(len(train_sessions), len(val_sessions), len(test_sessions))
 
     def fetch_batch(sessions, offset, batch_size):
         '''
@@ -67,6 +56,17 @@ def data_generator(cur, folds, test_idx, batch_size):
             raise StopIteration  # All data for this split is processed
 
         return np.concatenate(x_batch, axis=0), np.concatenate(y_batch, axis=0)
+
+    # set training sessions (!= test session)
+    train_sessions = [(dataset, session) for i, group in enumerate(folds) if i!=test_idx
+                      for dataset, session in group]
+    test_sessions = folds[test_idx]
+
+    n_val = int(len(test_sessions) * 4/5)           # number of sessions to retain in validation set
+    val_sessions = test_sessions[:n_val]
+    test_sessions = test_sessions[n_val:]
+
+    # print(len(train_sessions), len(val_sessions), len(test_sessions))
 
     offset = 0
     while True:
