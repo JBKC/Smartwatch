@@ -355,7 +355,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     print("EARLY STOPPING - onto next fold")
                     break
 
-                # save down current best model state (trial mode)
+                # save down current best model state (trial mode - saves after every epoch)
                 checkpoint = {
                     'folds': folds,
                     'fold_idx': test_idx,
