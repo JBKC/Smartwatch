@@ -15,7 +15,8 @@ import psutil
 from wandb_logger import WandBLogger
 import datetime
 import copy
-import gc
+import subprocess
+
 
 
 def data_generator(cur, folds, test_idx):
@@ -117,15 +118,6 @@ def temporal_pairs(x, labels):
     return x_pairs, y
 
 def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
-
-    def save_checkpoint(state, filename):
-        """ Save a checkpoint to a file """
-        torch.save(state, filename)
-    def load_checkpoint(filename):
-        """ Load a checkpoint from a file """
-        if os.path.exists(filename):
-            return torch.load(filename)
-        return None
 
     def torch_convert(X, y, batch_size=10):
         '''
@@ -232,7 +224,13 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
         )
 
         # generate all data for given fold
-        for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx):
+        for x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx):
+
+            # shut down Docker for memory reasons
+            cur.close()
+            conn.close()
+            subprocess.run(["docker", "stop", "timescaledb"], check=True)
+            print(f"Docker ended")
 
             # globally shuffle training data
             perm_train = np.random.permutation(x_train.shape[0])
@@ -282,8 +280,8 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                         # get into format for model input - shape is (batch_size, 1, 256)
                         x_cur = x_batch[:, :, :, 0]
                         x_prev = x_batch[:, :, :, -1]
-                        print(f"Model inputs (x_cur, x_prev): {x_cur.shape}, {x_prev.shape}")
-                        print(f"Memory usage: {psutil.virtual_memory().percent}%")
+                        # print(f"Model inputs (x_cur, x_prev): {x_cur.shape}, {x_prev.shape}")
+                        # print(f"Memory usage: {psutil.virtual_memory().percent}%")
 
                         # forward pass through model (convolutions + attention + probabilistic)
                         dist = model(x_cur, x_prev)
@@ -372,6 +370,11 @@ def main():
     host = 'localhost'
     # host = '104.197.247.27'
 
+    # start Docker container
+    subprocess.run(["docker", "start", "timescaledb"], check=True)
+    print(f"Docker started")
+    time.sleep(2)
+
     # extract filtered BVP signal from SQL database
     database = "smartwatch_raw_data_all"
     conn = psycopg2.connect(
@@ -389,9 +392,6 @@ def main():
     datasets = [row[0] for row in cur.fetchall()]
 
     train_model(cur, conn, datasets, batch_size, n_epochs, lr)
-
-    cur.close()
-    conn.close()
 
 
 if __name__ == '__main__':
