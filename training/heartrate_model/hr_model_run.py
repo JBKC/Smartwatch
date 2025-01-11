@@ -198,10 +198,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
     # predefine the folds for LOSO split
     folds = create_folds(datasets,n_folds=5)
 
-    # iterate over folds (each fold trains a new model)
+    # iterate over folds
     for test_idx in range(len(folds)):
 
-        # initialise model
+        # initialise model (each fold trains a new model)
         model = TemporalAttentionModel()
         optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08)
 
