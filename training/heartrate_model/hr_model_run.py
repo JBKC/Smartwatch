@@ -230,7 +230,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
         # generate all data for given fold
         for  x_train, y_train, x_val, y_val, x_test, y_test in data_generator(cur, folds, test_idx):
 
-            # perform global shuffling
+            # globally shuffle training data
             perm_train = np.random.permutation(x_train.shape[0])
             x_train = x_train[perm_train]
             y_train = y_train[perm_train]
@@ -264,20 +264,21 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     x_train_chunk = x_train[start_idx:end_idx]
                     y_train_chunk = y_train[start_idx:end_idx]
 
-                    print(x_train_chunk.shape, y_train_chunk.shape)
+                    # print(x_train_chunk.shape, y_train_chunk.shape)
 
-                    # create batches for current chunk
+                    # create batches within current chunk
                     train_dataset = TensorDataset(x_train_chunk, y_train_chunk)
                     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
                     for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
                         optimizer.zero_grad()
 
-                        print(x_batch.shape, y_batch.shape)
+                        # print(x_batch.shape, y_batch.shape)
 
-                        # prep data for model input - shape is (batch_size, n_channels, sequence_length) = (256, 1, 256)
-                        x_cur = x_batch[:, :, 0].unsqueeze(1)
-                        x_prev = x_batch[:, :, -1].unsqueeze(1)
+                        # get into format for model input - shape is (batch_size, 1, 256)
+                        x_cur = x_batch[:, :, 0]
+                        x_prev = x_batch[:, :, -1]
+                        print(x_cur.shape, x_prev.shape)
 
                         # forward pass through model (convolutions + attention + probabilistic)
                         dist = model(x_cur, x_prev)
