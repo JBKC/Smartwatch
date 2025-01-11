@@ -355,20 +355,19 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     print("EARLY STOPPING - onto next fold")
                     break
 
-            # save down current best model state
-            checkpoint = {
-                'folds': folds,
-                'fold_idx': test_idx,
-                'model_state_dict': best_model_state,  # model weights
-                'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
-                'best_train_loss': best_train_loss,
-                'best_val_loss': best_val_loss,  # the best validation loss
-                'counter': counter,  # early stopping counter
-            }
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            model_path = f"saved_models/hr_model/hr_model_{timestamp}.pth"
-            torch.save(checkpoint, model_path)
-
+                # save down current best model state (trial mode)
+                checkpoint = {
+                    'folds': folds,
+                    'fold_idx': test_idx,
+                    'model_state_dict': best_model_state,  # model weights
+                    'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
+                    'best_train_loss': best_train_loss,
+                    'best_val_loss': best_val_loss,  # the best validation loss
+                    'counter': counter,  # early stopping counter
+                }
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                model_path = f"saved_models/hr_model/hr_model_{timestamp}.pth"
+                torch.save(checkpoint, model_path)
 
             ### run batches of test data ###
             model.eval()
