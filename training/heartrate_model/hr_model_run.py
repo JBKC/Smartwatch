@@ -252,6 +252,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
             start_time = time.time()
 
+            ### training loop ###
             for epoch in range(n_epochs):
                 model.train()
                 epoch_loss = 0
@@ -297,23 +298,42 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                               f'Batch: {batch_idx + 1}/{len(train_loader)}, '
                               f'Train Loss: {loss:.4f}')
 
+                        del x_batch, y_batch
+
                     # save memory
-                    del train_loader, x_train_chunk, y_train_chunk, x_batch, y_batch
+                    del train_loader, x_train_chunk, y_train_chunk
 
                 # overall epoch loss
                 epoch_loss /= n_batches
                 if epoch_loss < best_train_loss:
                     best_train_loss = epoch_loss
 
-                # validation on whole validation set after each epoch
+                ### batched validation on whole set after each epoch ###
                 model.eval()
+                val_dataset = TensorDataset(x_val, y_val)
+                val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+                val_loss = 0
 
                 with torch.no_grad():
-                    val_dist = model(x_val[:,:,0].unsqueeze(1), x_val[:,:,-1].unsqueeze(1))
-                    val_loss = NLL(val_dist, y_val).mean()          # average validation across all windows
+                    for batch_idx, (x_batch, y_batch) in enumerate(val_loader):
 
-                    print(f'Fold: {test_idx + 1}/{len(folds)}, Epoch [{epoch + 1}/{n_epochs}], '
-                          f'Validation Loss: {val_loss.item():.4f}')
+                        # Prepare the data for model input
+                        x_cur = x_batch[:, :, :, 0]
+                        x_prev = x_batch[:, :, :, -1]
+
+                        # Pass the chunk through the model
+                        dist = model(x_cur, x_prev)
+
+                        loss = NLL(dist, y_batch).mean()
+                        val_loss += loss.item()
+
+                        del x_batch, y_batch
+
+                val_loss /= len(val_loader)
+                del val_loader
+
+                print(f'Fold: {test_idx + 1}/{len(folds)}, Epoch [{epoch + 1}/{n_epochs}], '
+                      f'Validation Loss: {val_loss:.4f}')
 
                 # upload metrics to logger for each epoch
                 metrics = {"train loss": epoch_loss, "validation loss": val_loss}
@@ -335,17 +355,6 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                     print("EARLY STOPPING - onto next fold")
                     break
 
-            # test on test data after all epochs complete for current fold
-            with torch.no_grad():
-                test_dist = model(x_test[:,:,0].unsqueeze(1), x_test[:,:,-1].unsqueeze(1))
-                test_loss = NLL(test_dist, y_test).mean()
-
-                print(f'Fold: {test_idx + 1}/{len(folds)}, Test Loss: {test_loss.item():.4f}')
-
-            end_time = time.time()
-            print(f"TRAINING COMPLETE - Fold: {test_idx + 1}/{len(folds)}, "
-                  f"time: {(end_time - start_time) / 3600:.2f} hours.")
-
             # save down current best model state
             checkpoint = {
                 'folds': folds,
@@ -356,10 +365,40 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                 'best_val_loss': best_val_loss,  # the best validation loss
                 'counter': counter,  # early stopping counter
             }
-
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             model_path = f"saved_models/hr_model/hr_model_{timestamp}.pth"
             torch.save(checkpoint, model_path)
+
+
+            ### run batches of test data ###
+            model.eval()
+            test_dataset = TensorDataset(x_test, y_test)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+            test_loss = 0
+
+            with torch.no_grad():
+                for batch_idx, (x_batch, y_batch) in enumerate(test_loader):
+
+                    # Prepare the data for model input
+                    x_cur = x_batch[:, :, :, 0]
+                    x_prev = x_batch[:, :, :, -1]
+
+                    # Pass the chunk through the model
+                    dist = model(x_cur, x_prev)
+
+                    loss = NLL(dist, y_batch).mean()
+                    test_loss += loss.item()
+
+                    del x_batch, y_batch
+
+            test_loss /= len(test_loader)
+            del test_loader
+
+            print(f'Fold: {test_idx + 1}/{len(folds)}, Test Loss: {test_loss.item():.4f}')
+
+            end_time = time.time()
+            print(f"TRAINING COMPLETE - Fold: {test_idx + 1}/{len(folds)}, "
+                  f"time: {(end_time - start_time) / 3600:.2f} hours.")
 
     return
 
