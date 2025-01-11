@@ -15,6 +15,8 @@ import psutil
 from wandb_logger import WandBLogger
 import datetime
 import copy
+import gc
+
 
 def data_generator(cur, folds, test_idx):
     '''
@@ -198,6 +200,8 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
     # predefine the folds for LOSO split
     folds = create_folds(datasets,n_folds=5)
 
+    print(f"Memory usage: {psutil.virtual_memory().percent}%")
+
     # iterate over folds
     for test_idx in range(len(folds)):
 
@@ -244,7 +248,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             print(f"Test: {x_test.shape}, {y_test.shape}")
 
             ## chunk data for smooth model loading
-            chunk_size = batch_size*10
+            chunk_size = batch_size * 10
             n_chunks = (len(x_train) + chunk_size - 1) // chunk_size
 
             # train_dataset = TensorDataset(x_train, y_train)
@@ -276,9 +280,10 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
                         # print(x_batch.shape, y_batch.shape)
 
                         # get into format for model input - shape is (batch_size, 1, 256)
-                        x_cur = x_batch[:, :, 0]
-                        x_prev = x_batch[:, :, -1]
-                        print(x_cur.shape, x_prev.shape)
+                        x_cur = x_batch[:, :, :, 0]
+                        x_prev = x_batch[:, :, :, -1]
+                        print(f"Model inputs (x_cur, x_prev): {x_cur.shape}, {x_prev.shape}")
+                        print(f"Memory usage: {psutil.virtual_memory().percent}%")
 
                         # forward pass through model (convolutions + attention + probabilistic)
                         dist = model(x_cur, x_prev)
@@ -391,4 +396,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

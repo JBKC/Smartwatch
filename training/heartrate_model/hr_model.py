@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
+import psutil
 
 
 class ConvBlock(nn.Module):
@@ -52,8 +53,9 @@ class ConvBlock(nn.Module):
             # causal padding
             padding_size = self.dilation * (self.kernel_size - 1)
 
-            # apply to only left side of sequence
-            x = F.pad(x, (padding_size, 0))
+            # manually apply padding
+            pad_tensor = torch.zeros(x.size(0), x.size(1), padding_size, device=x.device, dtype=x.dtype)
+            x = torch.cat((pad_tensor, x), dim=2)
 
             # Apply convolution
             x = conv(x)
@@ -84,6 +86,7 @@ class TemporalConvolution(nn.Module):
         '''
 
         x_cur = self.conv_block1(x_cur)
+
         x_prev = self.conv_block1(x_prev)
 
         x_cur = self.conv_block2(x_cur)
