@@ -248,9 +248,7 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
             ## chunk data for smooth model loading
             chunk_size = batch_size * 10
             n_chunks = (len(x_train) + chunk_size - 1) // chunk_size
-
-            # train_dataset = TensorDataset(x_train, y_train)
-            # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+            n_batches = (len(x_train) + batch_size - 1) // batch_size
 
             start_time = time.time()
 
@@ -293,11 +291,17 @@ def train_model(cur, conn, datasets, batch_size, n_epochs, lr):
 
                         epoch_loss += loss.item()
 
-                        print(f'Fold: {test_idx + 1}/{len(folds)}, Chunk {chunk_idx + 1}/{n_chunks}, '
-                              f'Batch: [{batch_idx + 1}/{len(train_loader)}], '
-                              f'Epoch [{epoch + 1}/{n_epochs}], Train Loss: {loss:.4f}')
+                        print(f'Fold: {test_idx + 1}/{len(folds)}, '
+                              f'Epoch [{epoch + 1}/{n_epochs}], ' 
+                              f'Chunk {chunk_idx + 1}/{n_chunks}, '
+                              f'Batch: {batch_idx + 1}/{len(train_loader)}, '
+                              f'Train Loss: {loss:.4f}')
 
-                epoch_loss /= len(train_loader)
+                    # save memory
+                    del train_loader, x_train_chunk, y_train_chunk, x_batch, y_batch
+
+                # overall epoch loss
+                epoch_loss /= n_batches
                 if epoch_loss < best_train_loss:
                     best_train_loss = epoch_loss
 
